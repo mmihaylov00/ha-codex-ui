@@ -151,7 +151,7 @@ class ContextMixin:
             return request
         if len(context) > max_context_length:
             marker = _CONTEXT_TRUNCATED_MARKER
-            context = f"{context[:max(0, max_context_length - len(marker))].rstrip()}{marker}"
+            context = f"{context[: max(0, max_context_length - len(marker))].rstrip()}{marker}"
         return f"{context}{separator}{request}"
 
     def _context_roots(self) -> list[Path]:

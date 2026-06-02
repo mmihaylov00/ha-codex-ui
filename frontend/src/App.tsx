@@ -107,6 +107,7 @@ function CodexApp({ hass, panel }: { hass: HomeAssistant | null; panel: PanelInf
         onNew={guarded(actions.createSession)}
         onSelect={setActiveId}
         onArchive={guarded(actions.archiveSession)}
+        onDeleteArchived={guarded(actions.deleteArchivedSession)}
         onToggleArchived={() => setShowArchived(!showArchived)}
         onValidate={guarded(() => actions.runValidation(activeId))}
         onRestartNow={guarded((sessionId, approvalId) => actions.respondApproval(sessionId, approvalId, true, "Restarting Home Assistant"))}
@@ -177,6 +178,9 @@ function CodexApp({ hass, panel }: { hass: HomeAssistant | null; panel: PanelInf
           onGitSetupGenerateKey={guarded(actions.generateGitSetupKey)}
           onGitSetupRemoteSave={guarded(actions.saveGitSetupRemote)}
           onGitSetupPull={guarded(actions.pullGitSetupRemote)}
+          onGitSetupBranchChange={guarded(actions.changeGitSetupBranch)}
+          onGitSetupCommitCheckout={guarded(actions.checkoutGitSetupCommit)}
+          onArchiveCleanup={guarded(actions.cleanupArchivedSessions)}
         />
       ) : null}
       <ToastStack />

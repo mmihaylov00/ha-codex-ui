@@ -6,8 +6,11 @@ import {
   addContextSelection,
   buildContextSendPayload,
   createQueuedContextMessage,
+  contextAttachmentsFromItems,
   contextAttachmentsFromMetadata,
   contextItemsForSend,
+  iconForContextKind,
+  removeContextSelection,
   shouldClearContextAfterSend,
 } from "../../frontend/src/features/context/contextUtils.ts";
 
@@ -26,6 +29,7 @@ test("context selection is deduplicated and capped", () => {
 
   assert.equal(selected.length, CONTEXT_SELECTION_LIMIT);
   assert.deepEqual(selected.map((item) => item.id), items.slice(0, CONTEXT_SELECTION_LIMIT).map((item) => item.id));
+  assert.deepEqual(removeContextSelection(selected, "entity:entity.sensor_0").map((item) => item.id), items.slice(1, CONTEXT_SELECTION_LIMIT).map((item) => item.id));
 });
 
 test("context send payload preserves selected structure without composing the user prompt", () => {
@@ -124,6 +128,57 @@ test("message metadata exposes compact attachments for transcript rendering", ()
       subtitle: "light.kitchen - state on",
     },
   ]);
+  assert.deepEqual(contextAttachmentsFromMetadata(undefined), []);
+});
+
+test("context normalization trims attachments and drops invalid payloads", () => {
+  const items = contextItemsForSend([
+    {
+      id: " light.kitchen ",
+      kind: "entity",
+      label: " Kitchen Light ",
+      subtitle: " light.kitchen ",
+      payload: ["not", "an", "object"],
+    },
+    {
+      id: "script.goodnight",
+      kind: "script",
+      label: "Goodnight",
+      subtitle: "",
+      payload: { entity_id: "script.goodnight" },
+    },
+    { id: "bad", kind: "unknown", label: "Bad" },
+  ]);
+
+  assert.deepEqual(items, [
+    {
+      id: "light.kitchen",
+      kind: "entity",
+      label: "Kitchen Light",
+      subtitle: "light.kitchen",
+    },
+    {
+      id: "script.goodnight",
+      kind: "script",
+      label: "Goodnight",
+      payload: { entity_id: "script.goodnight" },
+    },
+  ]);
+  assert.deepEqual(contextAttachmentsFromItems(items), [
+    { id: "light.kitchen", kind: "entity", label: "Kitchen Light", subtitle: "light.kitchen" },
+    { id: "script.goodnight", kind: "script", label: "Goodnight" },
+  ]);
+});
+
+test("context icons cover all supported context kinds", () => {
+  assert.equal(iconForContextKind("area"), "mdi:floor-plan");
+  assert.equal(iconForContextKind("automation"), "mdi:robot-industrial-outline");
+  assert.equal(iconForContextKind("config_file"), "mdi:file-document-outline");
+  assert.equal(iconForContextKind("device"), "mdi:devices");
+  assert.equal(iconForContextKind("entity"), "mdi:home-assistant");
+  assert.equal(iconForContextKind("log"), "mdi:text-box-search-outline");
+  assert.equal(iconForContextKind("script"), "mdi:script-text-outline");
+  assert.equal(iconForContextKind("unknown"), "mdi:paperclip");
 });
 
 test("selected context clears only after a sent or queued prompt", () => {

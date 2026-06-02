@@ -2,6 +2,8 @@ import asyncio
 import importlib.util
 import json
 import subprocess
+import sys
+import types
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -11,12 +13,20 @@ from custom_components.ha_codex.capabilities import (
     discover_addon_paths,
     discover_validation_command,
 )
-from custom_components.ha_codex.codex_events import NormalizedEvent, normalize_event
+from custom_components.ha_codex.codex_events import (
+    NormalizedEvent,
+    compact_raw_event,
+    normalize_event,
+)
 from custom_components.ha_codex.config_flow import (
+    HaCodexConfigFlow,
+    HaCodexOptionsFlow,
     config_defaults,
     config_from_entry_data,
+    config_schema,
     normalize_config_input,
 )
+from custom_components.ha_codex.git_ops import GitOperationsMixin
 from custom_components.ha_codex.manager import CodexManager, summarize_prompt_title
 from custom_components.ha_codex.models import (
     ChatMessage,
@@ -27,6 +37,10 @@ from custom_components.ha_codex.models import (
 from custom_components.ha_codex.runner import RunnerOptions, build_codex_command
 from custom_components.ha_codex.runtime_settings import (
     default_settings,
+    model_for_preset,
+    normalize_model_presets,
+    normalize_run_settings,
+    normalize_settings,
     resolve_run_settings,
     update_settings,
 )
@@ -126,6 +140,148 @@ class ConfigEntryTests(unittest.TestCase):
         self.assertEqual(merged["codex_command"], "codex")
         self.assertFalse(merged["require_admin"])
 
+    def test_config_schema_formats_nullable_and_list_values_for_forms(self):
+        schema = config_schema(
+            {
+                "bridge_url": None,
+                "addon_write_scope": ["/addons", "/addon_configs"],
+                "validation_command": ["ha", "core", "check"],
+            }
+        )
+
+        self.assertIn("bridge_url", schema)
+        self.assertEqual(schema["bridge_url"], str)
+        self.assertIn("addon_write_scope", schema)
+        normalized = normalize_config_input(
+            {
+                "workspace_path": "  ",
+                "codex_command": " codex ",
+                "bridge_url": "null",
+                "require_admin": "off",
+                "addon_write_scope": ["/addons"],
+                "ignored": "value",
+            }
+        )
+        self.assertEqual(normalized["workspace_path"], "/config")
+        self.assertEqual(normalized["codex_command"], "codex")
+        self.assertEqual(normalized["bridge_url"], None)
+        self.assertFalse(normalized["require_admin"])
+        self.assertEqual(normalized["addon_write_scope"], ["/addons"])
+
+    def test_config_and_options_flow_create_entries_and_forms(self):
+        flow = HaCodexConfigFlow()
+        calls = []
+        flow._async_set_unique_id = lambda unique_id: _async_value(
+            calls.append(("unique", unique_id))
+        )
+        flow._abort_if_unique_id_configured = lambda: calls.append(("abort_check",))
+        flow.async_create_entry = lambda **kwargs: {"type": "entry", **kwargs}
+        flow.async_show_form = lambda **kwargs: {"type": "form", **kwargs}
+
+        created = asyncio.run(flow.async_step_user({"codex_command": "codex"}))
+        self.assertEqual(created["type"], "entry")
+        self.assertEqual(created["title"], "HA Codex UI")
+        self.assertEqual(created["data"]["codex_command"], "codex")
+
+        form = asyncio.run(flow.async_step_user())
+        self.assertEqual(form["type"], "form")
+        self.assertEqual(form["step_id"], "user")
+
+        imported = asyncio.run(flow.async_step_import({"bridge_url": "none"}))
+        self.assertEqual(imported["data"]["bridge_url"], None)
+        self.assertEqual(calls[0], ("unique", "ha_codex"))
+
+        options = HaCodexConfigFlow.async_get_options_flow(
+            types.SimpleNamespace(data={"codex_command": "/config/bin/codex"}, options={})
+        )
+        self.assertIsInstance(options, HaCodexOptionsFlow)
+        options.async_create_entry = lambda **kwargs: {"type": "entry", **kwargs}
+        options.async_show_form = lambda **kwargs: {"type": "form", **kwargs}
+
+        options_form = asyncio.run(options.async_step_init())
+        self.assertEqual(options_form["type"], "form")
+        options_entry = asyncio.run(options.async_step_init({"require_admin": False}))
+        self.assertFalse(options_entry["data"]["require_admin"])
+
+
+class IntegrationSetupTests(unittest.IsolatedAsyncioTestCase):
+    async def test_yaml_setup_imports_when_config_entries_are_available(self):
+        import custom_components.ha_codex as integration
+
+        config_entries_module = types.ModuleType("homeassistant.config_entries")
+        config_entries_module.SOURCE_IMPORT = "import"
+        sys.modules["homeassistant.config_entries"] = config_entries_module
+
+        hass = _FakeSetupHass("/config")
+        self.assertTrue(await integration.async_setup(hass, {}))
+        self.assertEqual(hass.created_tasks, [])
+
+        hass = _FakeSetupHass("/config")
+        hass.config_entries.entries = [object()]
+        self.assertTrue(
+            await integration.async_setup(hass, {"ha_codex": {"codex_command": "codex"}})
+        )
+        self.assertEqual(hass.created_tasks, [])
+
+        hass = _FakeSetupHass("/config")
+        self.assertTrue(
+            await integration.async_setup(hass, {"ha_codex": {"codex_command": "codex"}})
+        )
+        self.assertEqual(len(hass.created_tasks), 1)
+        self.assertEqual(hass.config_entries.flow.calls[0][0], "ha_codex")
+
+    async def test_setup_entry_registers_static_panel_commands_and_unloads(self):
+        import custom_components.ha_codex as integration
+        import custom_components.ha_codex.manager as manager_module
+
+        with TemporaryDirectory(dir=CONFIG_TEMP_DIR) as tmp:
+            root = Path(tmp)
+            panel_dir = root / "www" / "ha_codex"
+            panel_dir.mkdir(parents=True)
+            (panel_dir / "panel.js").write_text("console.log('panel')\n", encoding="utf-8")
+            hass = _FakeSetupHass(root)
+            calls = _install_runtime_setup_stubs()
+            original_manager = manager_module.CodexManager
+            try:
+                manager_module.CodexManager = _FakeRuntimeManager
+                entry = _FakeConfigEntry(
+                    data={"bridge_url": "http://127.0.0.1:8765"},
+                    options={"require_admin": False},
+                )
+                self.assertTrue(await integration.async_setup_entry(hass, entry))
+
+                self.assertIsInstance(hass.data["ha_codex"], _FakeRuntimeManager)
+                self.assertEqual(hass.data["ha_codex"].loaded, True)
+                self.assertEqual(hass.data["ha_codex"].started_bridge, True)
+                runtime_manager = hass.data["ha_codex"]
+                self.assertEqual(len(hass.http.static_paths), 1)
+                self.assertEqual(calls["panels"][0]["frontend_url_path"], "ha-codex")
+                self.assertFalse(calls["panels"][0]["require_admin"])
+                self.assertEqual(len(calls["commands"]), 1)
+                self.assertEqual(len(entry.unloads), 1)
+
+                self.assertTrue(await integration.async_unload_entry(hass, entry))
+                self.assertTrue(runtime_manager.tasks["run"].cancelled)
+                self.assertEqual(calls["removed_panels"], ["ha-codex"])
+
+                self.assertTrue(await integration.async_reload_entry(hass, entry))
+            finally:
+                manager_module.CodexManager = original_manager
+
+    async def test_options_update_and_panel_cache_version_fallbacks(self):
+        import custom_components.ha_codex as integration
+
+        hass = _FakeSetupHass("/config")
+        entry = _FakeConfigEntry()
+        await integration._async_options_updated(hass, entry)
+        self.assertEqual(hass.config_entries.reloads, [entry.entry_id])
+
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.assertEqual(integration._panel_cache_version(root), "dev")
+            (root / "manifest.json").write_text('{"version": "1.2.3"}', encoding="utf-8")
+            self.assertEqual(integration._panel_cache_version(root), "1.2.3")
+
 
 class BridgeAccountTests(unittest.TestCase):
     def test_auth_status_reports_missing_auth_as_logged_out(self):
@@ -182,6 +338,104 @@ class BridgeAccountTests(unittest.TestCase):
         self.assertEqual(parsed["user_code"], "ABCD-EFGH")
         self.assertNotIn("secret-token", sanitized)
         self.assertNotIn("sk-real-secret", sanitized)
+
+
+class BridgeRunnerTests(unittest.IsolatedAsyncioTestCase):
+    async def test_bridge_runner_streams_json_raw_and_approval_events(self):
+        import custom_components.ha_codex.bridge_runner as bridge_runner
+
+        aiohttp, calls = _install_aiohttp_runner_stub(
+            [
+                b"\n",
+                b"not-json\n",
+                json.dumps(
+                    {
+                        "type": "exec_approval_request",
+                        "id": "approval-1",
+                        "command": "ha core restart",
+                        "cwd": "/config",
+                    }
+                ).encode(),
+                json.dumps({"type": "thread.started", "thread_id": "thread-1"}).encode(),
+            ]
+        )
+        runner = bridge_runner.CodexBridgeRunner(
+            "http://bridge/",
+            RunnerOptions(
+                codex_command="codex",
+                workspace_path="/config",
+                writable_paths=["/addons"],
+            ),
+        )
+
+        approvals = []
+
+        async def approve(event):
+            approvals.append(event.approval_id)
+            return True
+
+        events = [
+            event
+            async for event in runner.run("Prompt", "codex-session", approve, {"model": "gpt-5"})
+        ]
+
+        self.assertEqual(runner.bridge_url, "http://bridge")
+        self.assertEqual(
+            [event.kind for event in events], ["raw", "approval_required", "session_started"]
+        )
+        self.assertEqual(approvals, ["approval-1"])
+        self.assertEqual(calls["posts"][0]["url"], "http://bridge/run")
+        self.assertEqual(calls["posts"][0]["json"]["writable_paths"], ["/addons"])
+        self.assertEqual(calls["posts"][1]["url"], "http://bridge/approvals/approval-1")
+        self.assertEqual(calls["posts"][1]["json"], {"approved": True})
+        self.assertIs(aiohttp.ClientSession, _FakeRunnerClientSession)
+
+    async def test_bridge_runner_restarts_once_after_connection_failure(self):
+        _install_aiohttp_runner_stub(
+            [json.dumps({"type": "thread.started", "thread_id": "ok"}).encode()]
+        )
+        import custom_components.ha_codex.bridge_runner as bridge_runner
+
+        runner = bridge_runner.CodexBridgeRunner(
+            "http://bridge",
+            RunnerOptions(codex_command="codex", workspace_path="/config"),
+        )
+        attempts = {"count": 0}
+        restarts = []
+
+        async def stream_once(_payload, _approval_handler):
+            attempts["count"] += 1
+            if attempts["count"] == 1:
+                raise sys.modules["aiohttp"].ClientConnectionError("offline")
+            yield NormalizedEvent("message", text="recovered")
+
+        async def restart():
+            restarts.append("restart")
+
+        runner._stream_run = stream_once
+        runner._restart_bridge = restart
+
+        events = [event async for event in runner.run("Prompt", None)]
+
+        self.assertEqual([event.kind for event in events], ["action", "message"])
+        self.assertEqual(restarts, ["restart"])
+
+    async def test_bridge_restart_failure_raises_runtime_error(self):
+        import custom_components.ha_codex.bridge_runner as bridge_runner
+
+        original_restart = bridge_runner.async_restart_bridge_service
+        try:
+            bridge_runner.async_restart_bridge_service = lambda: _async_value(
+                {"ok": False, "error": "blocked"}
+            )
+            runner = bridge_runner.CodexBridgeRunner(
+                "http://bridge",
+                RunnerOptions(codex_command="codex", workspace_path="/config"),
+            )
+            with self.assertRaisesRegex(RuntimeError, "blocked"):
+                await runner._restart_bridge()
+        finally:
+            bridge_runner.async_restart_bridge_service = original_restart
 
 
 class CodexEventTests(unittest.TestCase):
@@ -315,6 +569,68 @@ class CodexEventTests(unittest.TestCase):
             ],
         )
         self.assertIn("File changes:", event.text)
+
+    def test_normalizes_nested_commands_patches_and_fallback_events(self):
+        shell_event = normalize_event(
+            {
+                "type": "tool.started",
+                "tool_call": {
+                    "function": {"name": "shell"},
+                    "arguments": json.dumps({"cmd": ["python", "-m", "unittest"]}),
+                },
+            }
+        )
+        self.assertEqual(shell_event.kind, "action")
+        self.assertEqual(shell_event.command, "python -m unittest")
+
+        invalid_shell = normalize_event({"type": "exec.started", "command": "sh -lc 'unterminated"})
+        self.assertEqual(invalid_shell.command, "sh -lc 'unterminated")
+
+        patch_event = normalize_event(
+            {
+                "type": "function_call",
+                "tool": {"recipient": "functions.apply_patch"},
+                "arguments": json.dumps(
+                    {
+                        "patch": (
+                            "*** Begin Patch\n"
+                            "*** Delete File: old.yaml\n"
+                            "*** Update File: before.yaml\n"
+                            "*** Move to: after.yaml\n"
+                            "*** End Patch\n"
+                        )
+                    }
+                ),
+            }
+        )
+        self.assertEqual(
+            patch_event.file_changes,
+            [
+                {"status": "deleted", "path": "old.yaml"},
+                {"status": "renamed", "path": "after.yaml", "old_path": "before.yaml"},
+            ],
+        )
+        self.assertIn("`before.yaml` -> `after.yaml`", patch_event.text)
+
+        self.assertEqual(
+            normalize_event({"type": "message.created", "message": {"content": "done"}}).text,
+            "done",
+        )
+        self.assertEqual(
+            normalize_event({"type": "item.created", "item": {"content": "nested"}}).text,
+            "nested",
+        )
+        self.assertEqual(normalize_event({"type": "turn.end"}).kind, "run_finished")
+        self.assertEqual(
+            normalize_event({"type": "unknown", "error": "plain error"}).text, "plain error"
+        )
+
+    def test_compact_raw_event_bounds_lists_and_ignores_non_object_roots(self):
+        compacted = compact_raw_event({"items": list(range(55))})
+
+        self.assertEqual(len(compacted["items"]), 51)
+        self.assertEqual(compacted["items"][-1], "... truncated 5 item(s)")
+        self.assertEqual(compact_raw_event(["not", "an", "object"]), {})
 
 
 class SessionModelTests(unittest.TestCase):
@@ -475,13 +791,60 @@ class RuntimeSettingsTests(unittest.TestCase):
         self.assertEqual(manual["resolved"]["plan_mode"], "off")
         self.assertEqual(manual["resolved"]["validation_depth"], "full")
 
+    def test_settings_normalization_rejects_invalid_values_and_preserves_safe_defaults(self):
+        self.assertEqual(normalize_settings(None)["defaults"]["model_preset_id"], "gpt_5_5")
+        with self.assertRaisesRegex(ValueError, "Settings update"):
+            update_settings(default_settings(), ["bad"])
+        with self.assertRaisesRegex(ValueError, "model_preset_id"):
+            update_settings(default_settings(), {"defaults": {"model_preset_id": "missing"}})
+        with self.assertRaisesRegex(ValueError, "model_preset_id is required"):
+            normalize_run_settings({"model_preset_id": ""})
+        with self.assertRaisesRegex(ValueError, "context_budget_chars"):
+            update_settings(default_settings(), {"context_budget_chars": "large"})
+        with self.assertRaisesRegex(ValueError, "between 1000 and 200000"):
+            update_settings(default_settings(), {"context_budget_chars": 999})
+
+        presets = normalize_model_presets(
+            [
+                "ignored",
+                {"id": "gpt_5_5", "label": "duplicate built-in", "model": "ignored"},
+                {"id": "custom", "label": "", "model": ""},
+                {"id": "custom", "label": "duplicate", "model": "duplicate"},
+            ]
+        )
+        custom = [preset for preset in presets if preset["id"] == "custom"]
+        self.assertEqual(custom, [{"id": "custom", "label": "custom", "model": None}])
+        self.assertEqual(normalize_model_presets("bad")[0]["id"], "gpt_5_5")
+
+        resolved = resolve_run_settings(
+            "What changed?",
+            [{"payload": {"target": "configuration.yaml", "action": "update"}}],
+            default_settings()["defaults"],
+            {"tool_visibility": "verbose", "unknown": "ignored"},
+        )
+        self.assertTrue(resolved["modifying"])
+        self.assertEqual(resolved["requested"]["tool_visibility"], "verbose")
+
+        settings = update_settings(
+            default_settings(),
+            {"model_presets": [{"id": "custom", "label": "Custom", "model": "custom-model"}]},
+        )
+        self.assertEqual(model_for_preset(settings, "custom"), "custom-model")
+        self.assertIsNone(model_for_preset(settings, "missing"))
+
     def test_read_only_approval_classifier_is_conservative(self):
+        self.assertTrue(is_safe_read_only_command("/bin/sh -lc 'cat configuration.yaml'"))
         self.assertTrue(is_safe_read_only_command("rg -n kitchen configuration.yaml"))
         self.assertTrue(is_safe_read_only_command("git status --short"))
         self.assertTrue(is_safe_read_only_command("git diff -- configuration.yaml"))
         self.assertTrue(is_safe_read_only_command("ha core check"))
         self.assertTrue(is_safe_read_only_command("sed -n '1,40p' configuration.yaml"))
 
+        self.assertFalse(is_safe_read_only_command(""))
+        self.assertFalse(is_safe_read_only_command("sh -lc 'unterminated"))
+        self.assertFalse(is_safe_read_only_command("git"))
+        self.assertFalse(is_safe_read_only_command("git log --oneline"))
+        self.assertFalse(is_safe_read_only_command("git diff --output patch.diff"))
         self.assertFalse(is_safe_read_only_command("sed -i 's/a/b/' configuration.yaml"))
         self.assertFalse(is_safe_read_only_command("find . -delete"))
         self.assertFalse(is_safe_read_only_command("cat configuration.yaml | sh"))
@@ -1249,6 +1612,122 @@ class SessionRunTests(unittest.IsolatedAsyncioTestCase):
             "Codex reported an error without additional details. Event type: error.",
         )
 
+    async def test_run_plan_handles_delta_empty_error_and_exception_paths(self):
+        async def run_plan_with(events_or_runner):
+            manager = CodexManager(
+                _FakeHass("/tmp"),
+                store=None,
+                workspace_path="/homeassistant",
+                codex_command="codex",
+                bridge_url=None,
+                addon_write_scope=None,
+                validation_command=None,
+            )
+            manager.runner = (
+                events_or_runner
+                if hasattr(events_or_runner, "run")
+                else _FakeRunner(events_or_runner)
+            )
+            manager.async_save = _async_noop
+            session = CodexSession(id="session-1", status="planning")
+            plan = {
+                "id": "plan-1",
+                "prompt": "Update configuration.yaml",
+                "run_prompt": "Update configuration.yaml",
+                "status": "planning",
+                "content": "",
+                "run_settings": {},
+            }
+            session.metadata["pending_plan"] = plan
+            manager.sessions[session.id] = session
+
+            await manager._async_run_plan(session.id, plan["id"])
+            return session, manager
+
+        delta_session, delta_manager = await run_plan_with(
+            [
+                NormalizedEvent("session_started", session_id="codex-session"),
+                NormalizedEvent("message_delta", text="Plan:"),
+                NormalizedEvent("message_delta", text="\n- Inspect configuration.yaml"),
+            ]
+        )
+        self.assertEqual(delta_session.codex_session_id, "codex-session")
+        self.assertEqual(delta_session.status, "waiting_plan_approval")
+        self.assertEqual(
+            delta_session.metadata["pending_plan"]["content"], "Plan:\n- Inspect configuration.yaml"
+        )
+        self.assertEqual(delta_manager.tasks, {})
+
+        empty_session, _empty_manager = await run_plan_with([])
+        self.assertEqual(empty_session.status, "waiting_plan_approval")
+        self.assertIn("Codex did not return a run plan", empty_session.messages[-1].content)
+
+        error_session, _error_manager = await run_plan_with(
+            [NormalizedEvent("error", text="planning failed")]
+        )
+        self.assertEqual(error_session.status, "error")
+        self.assertEqual(error_session.messages[-1].content, "planning failed")
+
+        exception_session, _exception_manager = await run_plan_with(_FailingRunner(RuntimeError()))
+        self.assertEqual(exception_session.status, "error")
+        self.assertIn("RuntimeError", exception_session.messages[-1].content)
+
+    async def test_stale_codex_thread_error_recovers_with_fresh_thread_prompt(self):
+        stale_id = "01234567-89ab-cdef-0123-456789abcdef"
+        manager = CodexManager(
+            _FakeHass("/tmp"),
+            store=None,
+            workspace_path="/homeassistant",
+            codex_command="codex",
+            bridge_url=None,
+            addon_write_scope=None,
+            validation_command=None,
+        )
+        manager.runner = _SequencedRunner(
+            [
+                [
+                    NormalizedEvent(
+                        "error",
+                        text=f"thread/resume failed: no rollout found for thread id {stale_id}",
+                    )
+                ],
+                [
+                    NormalizedEvent("session_started", session_id="fresh-thread"),
+                    NormalizedEvent("message", text="Recovered"),
+                    NormalizedEvent("run_finished"),
+                ],
+            ]
+        )
+        manager.async_save = _async_noop
+        manager.async_validate = _async_noop
+        manager._maybe_request_restart_approval = _async_noop
+        session = CodexSession(
+            id="session-1",
+            status="running",
+            codex_session_id=stale_id,
+            messages=[
+                ChatMessage(role="user", content="Original request"),
+                ChatMessage(role="assistant", content="Earlier response"),
+            ],
+        )
+        manager.sessions[session.id] = session
+
+        await manager._async_run_session(
+            session.id,
+            "Latest request",
+            run_settings={"validation_depth": "none"},
+        )
+
+        self.assertEqual(session.status, "idle")
+        self.assertEqual(session.codex_session_id, "fresh-thread")
+        self.assertEqual(len(manager.runner.calls), 2)
+        self.assertIsNone(manager.runner.calls[1][1])
+        self.assertIn("Stale Codex thread id", manager.runner.calls[1][0])
+        self.assertIn("Latest user request:\nLatest request", manager.runner.calls[1][0])
+        self.assertTrue(
+            any(message.metadata.get("kind") == "resume_recovery" for message in session.messages)
+        )
+
     async def test_command_event_is_persisted_as_markdown_code_block(self):
         manager = CodexManager(
             _FakeHass("/tmp"),
@@ -1764,6 +2243,329 @@ class GitCommandTests(unittest.TestCase):
         self.assertIsNone(files[0]["old_path"])
 
 
+class GitOperationsHelperTests(unittest.IsolatedAsyncioTestCase):
+    def test_git_path_parsing_visibility_and_selection_helpers(self):
+        with TemporaryDirectory(dir=CONFIG_TEMP_DIR) as tmp:
+            root = Path(tmp)
+            (root / "configuration.yaml").write_text("homeassistant:\n", encoding="utf-8")
+            manager = _FakeGitOpsManager(root)
+            manager.head_paths = {"configuration.yaml"}
+
+            parsed = manager._parse_git_status(
+                "\n".join(
+                    [
+                        " M homeassistant/configuration.yaml",
+                        "R  homeassistant/old.yaml -> homeassistant/new.yaml",
+                        "?? config/configuration.yaml",
+                        " D homeassistant/deleted.yaml",
+                        "?? node_modules/pkg/index.js",
+                        "",
+                    ]
+                )
+            )
+            files = manager._display_git_files(parsed)
+
+            self.assertEqual(files[0]["path"], "configuration.yaml")
+            self.assertEqual(files[1]["old_path"], "old.yaml")
+            self.assertEqual(files[2]["path"], "configuration.yaml")
+            self.assertEqual(files[2]["status"], "added")
+            self.assertFalse(manager._is_visible_git_path("node_modules/pkg/index.js"))
+            self.assertFalse(manager._is_visible_git_path("secrets.yaml"))
+            self.assertFalse(manager._is_visible_git_path("home-assistant_v2.db"))
+            self.assertEqual(manager._normalize_git_status_path("./config.yaml"), "config.yaml")
+            self.assertEqual(
+                manager._normalize_git_status_path(".././config.yaml"), "./config.yaml"
+            )
+
+            stats = manager._parse_git_numstat(
+                "2\t3\tconfiguration.yaml\n-\t-\tbinary.bin\nx\ty\tbad.yaml\n1\t2\t{old => new}.yaml"
+            )
+            self.assertEqual(stats["configuration.yaml"], {"added_lines": 2, "deleted_lines": 3})
+            self.assertEqual(stats["binary.bin"], {"added_lines": None, "deleted_lines": None})
+            self.assertEqual(stats["bad.yaml"], {"added_lines": None, "deleted_lines": None})
+            self.assertIn("new}.yaml", stats)
+
+            self.assertEqual(manager._git_status_label("??"), "untracked")
+            self.assertEqual(manager._git_status_label(" D"), "deleted")
+            self.assertEqual(manager._git_status_label("A "), "added")
+            self.assertEqual(manager._git_status_label("R "), "renamed")
+            self.assertEqual(manager._git_status_label("C "), "copied")
+            self.assertEqual(manager._git_status_label(" M"), "modified")
+            self.assertEqual(manager._git_status_label("!!"), "!!")
+
+            with self.assertRaises(ValueError):
+                manager._safe_review_display_path("../secrets.yaml")
+            with self.assertRaises(ValueError):
+                manager._safe_review_display_path("secrets.yaml")
+            with self.assertRaises(ValueError):
+                manager._coerce_git_review_selection(123)
+
+            change = {
+                "path": "new.yaml",
+                "git_path": "homeassistant/new.yaml",
+                "old_path": "old.yaml",
+                "old_git_path": "homeassistant/old.yaml",
+                "head_path": "homeassistant/head.yaml",
+            }
+            self.assertEqual(
+                manager._pathspecs_for_change(change),
+                ["homeassistant/head.yaml", "homeassistant/old.yaml", "homeassistant/new.yaml"],
+            )
+            self.assertEqual(
+                manager._dedupe_paths(["configuration.yaml", "configuration.yaml"]),
+                ["configuration.yaml"],
+            )
+            self.assertEqual(
+                manager._restore_pathspecs_for_selected_changes([change]),
+                ["homeassistant/head.yaml"],
+            )
+            self.assertEqual(
+                manager._untracked_changes_for_selected_discard(
+                    [{"path": "new.yaml", "code": "??"}]
+                )[0]["path"],
+                "new.yaml",
+            )
+
+    async def test_git_patch_and_discard_helpers_cover_file_branches(self):
+        with TemporaryDirectory(dir=CONFIG_TEMP_DIR) as tmp:
+            root = Path(tmp)
+            (root / "new.yaml").write_text("new: true\n", encoding="utf-8")
+            (root / "directory").mkdir()
+            manager = _FakeGitOpsManager(root)
+            manager.command_results = [
+                _cmd(stdout="diff --git a/new.yaml b/new.yaml\n+new\n", returncode=1),
+                _cmd(stdout="diff --git a/deleted.yaml b/deleted.yaml\n-old\n"),
+                _cmd(stdout="diff --git a/mod.yaml b/mod.yaml\n-old\n+new\n"),
+                _cmd(stdout="old\n"),
+            ]
+
+            patch = await manager._git_patch_for_file(
+                {"path": "new.yaml", "status": "untracked", "code": "??"}
+            )
+            self.assertEqual(patch["returncode"], 1)
+            patch = await manager._git_patch_for_file({"path": "deleted.yaml", "status": "deleted"})
+            self.assertIn("-old", patch["stdout"])
+            patch = await manager._git_patch_for_file({"path": "mod.yaml", "status": "modified"})
+            self.assertIn("+new", patch["stdout"])
+
+            (root / "current.yaml").write_text("new\n", encoding="utf-8")
+            patch = await manager._git_patch_against_head_file("head.yaml", "current.yaml")
+            self.assertTrue(patch["ok"])
+            self.assertIn("-old", patch["stdout"])
+            self.assertIn("+new", patch["stdout"])
+
+            remove_result = await manager._remove_untracked_review_files(
+                [{"path": "new.yaml"}, {"path": "directory"}]
+            )
+            self.assertFalse(remove_result["ok"])
+            self.assertIn("new.yaml", remove_result["stdout"])
+            self.assertIn("non-file", remove_result["stderr"])
+
+    async def test_git_setup_status_key_generation_and_identity_helpers(self):
+        with TemporaryDirectory(dir=CONFIG_TEMP_DIR) as tmp:
+            root = Path(tmp)
+            manager = _FakeGitOpsManager(root)
+            manager.command_results = [_cmd(ok=False, stderr="git missing")]
+            status = await GitOperationsMixin.async_git_setup_status(manager)
+            self.assertFalse(status["git_available"])
+            self.assertIn("git command", status["missing"])
+
+            (root / ".git").mkdir()
+            manager.command_results = [
+                _cmd(stdout="git version 2.50.0\n"),
+                _cmd(stdout="true\n"),
+                _cmd(stdout=f"{root}\n"),
+                _cmd(stdout="\n"),
+                _cmd(stdout="git@example.com:owner/repo.git\n"),
+                _cmd(stdout="origin/main\n"),
+                _cmd(stdout="abc123def456\x1fabc123d\x1f1710000000\x1fInitial config\n"),
+            ]
+            status = await GitOperationsMixin.async_git_setup_status(manager)
+            self.assertTrue(status["repository"])
+            self.assertEqual(status["remote_url"], "git@example.com:owner/repo.git")
+            self.assertEqual(
+                status["history"],
+                [
+                    {
+                        "hash": "abc123def456",
+                        "short_hash": "abc123d",
+                        "timestamp": 1710000000,
+                        "subject": "Initial config",
+                    }
+                ],
+            )
+            self.assertIn("current branch", status["missing"])
+            self.assertIn("SSH key", status["missing"])
+
+            ssh_dir = root / ".ssh"
+            ssh_dir.mkdir()
+            private_key = ssh_dir / "ha_codex_ed25519"
+            public_key = ssh_dir / "ha_codex_ed25519.pub"
+            private_key.write_text("private", encoding="utf-8")
+            public_key.write_text("ssh-ed25519 AAA test", encoding="utf-8")
+            existing = await GitOperationsMixin.async_git_setup_generate_key(manager)
+            self.assertEqual(existing["step"], "exists")
+            self.assertEqual(existing["public_key"], "ssh-ed25519 AAA test")
+
+            private_key.unlink()
+            public_key.unlink()
+
+            async def keygen(command, **_kwargs):
+                self.assertIn("ssh-keygen", command)
+                private_key.write_text("private", encoding="utf-8")
+                public_key.write_text("ssh-ed25519 BBB generated", encoding="utf-8")
+                return _cmd(stdout="generated")
+
+            manager._run_command = keygen
+            generated = await GitOperationsMixin.async_git_setup_generate_key(manager)
+            self.assertTrue(generated["ok"])
+            self.assertEqual(generated["public_key"], "ssh-ed25519 BBB generated")
+
+    async def test_git_setup_remote_and_pull_cover_fallback_branches(self):
+        with TemporaryDirectory(dir=CONFIG_TEMP_DIR) as tmp:
+            root = Path(tmp)
+            manager = _FakeGitOpsManager(root)
+            manager.status.update({"repository": False, "remote_configured": False})
+            manager.command_results = [
+                _cmd(ok=False, stderr="old git"),
+                _cmd(ok=True),
+                _cmd(ok=False, stderr="missing remote"),
+                _cmd(ok=True),
+                _cmd(ok=False, stdout=""),
+                _cmd(ok=True),
+                _cmd(ok=True, stdout=""),
+                _cmd(ok=True),
+            ]
+
+            result = await manager.async_git_setup_set_remote("https://example.test/repo.git")
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["step"], "remote")
+            self.assertEqual(
+                manager.commands[3][-4:],
+                ["remote", "add", "origin", "https://example.test/repo.git"],
+            )
+
+            manager.status.update({"repository": True, "remote_configured": True, "branch": ""})
+            manager.command_results = [
+                _cmd(ok=True),
+                _cmd(ok=False),
+                _cmd(ok=False),
+                _cmd(ok=False),
+                _cmd(ok=True, stdout=""),
+            ]
+            result = await manager.async_git_setup_pull()
+            self.assertEqual(result["step"], "branch")
+
+            manager.status.update({"branch": "main"})
+            manager.command_results = [
+                _cmd(ok=True),
+                _cmd(ok=False),
+                _cmd(ok=True, stdout="origin/main\n"),
+                _cmd(ok=True),
+                _cmd(ok=True),
+            ]
+            result = await manager.async_git_setup_pull()
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["step"], "checkout")
+
+            manager.command_results = [
+                _cmd(ok=True),
+                _cmd(ok=True),
+                _cmd(ok=True),
+            ]
+            result = await manager.async_git_setup_change_branch("feature/test")
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["step"], "checkout")
+            self.assertEqual(manager.commands[-1][-2:], ["checkout", "feature/test"])
+
+            with self.assertRaises(ValueError):
+                await manager.async_git_setup_change_branch("-bad")
+
+    async def test_git_setup_pull_commit_and_discard_failure_paths(self):
+        with TemporaryDirectory(dir=CONFIG_TEMP_DIR) as tmp:
+            root = Path(tmp)
+            manager = _FakeGitOpsManager(root)
+            manager.status = {
+                "git_available": False,
+                "repository": False,
+                "branch": "",
+                "remote_configured": False,
+                "remote_uses_ssh": False,
+                "ssh_key_exists": False,
+            }
+            result = await manager.async_git_setup_set_remote("https://example.test/repo.git")
+            self.assertEqual(result["step"], "git")
+            with self.assertRaises(ValueError):
+                await manager.async_git_setup_set_remote("-bad")
+
+            manager.status = {
+                "git_available": True,
+                "repository": False,
+                "branch": "",
+                "remote_configured": False,
+                "remote_uses_ssh": False,
+                "ssh_key_exists": False,
+            }
+            manager.command_results = [
+                _cmd(ok=False, stderr="init failed"),
+                _cmd(ok=False, stderr="init failed"),
+            ]
+            result = await manager.async_git_setup_set_remote("https://example.test/repo.git")
+            self.assertEqual(result["step"], "init")
+
+            manager.status.update({"repository": True, "remote_configured": False})
+            manager.command_results = [
+                _cmd(ok=False),
+                _cmd(ok=True),
+                _cmd(ok=True),
+                _cmd(ok=True),
+                _cmd(ok=True),
+            ]
+            result = await manager.async_git_setup_set_remote("https://example.test/repo.git")
+            self.assertEqual(result["step"], "remote")
+
+            manager.status.update({"repository": False, "remote_configured": False})
+            result = await manager.async_git_setup_pull()
+            self.assertEqual(result["step"], "setup")
+            manager.status.update(
+                {
+                    "repository": True,
+                    "remote_configured": True,
+                    "remote_uses_ssh": True,
+                    "ssh_key_exists": False,
+                }
+            )
+            result = await manager.async_git_setup_pull()
+            self.assertEqual(result["step"], "ssh_key")
+            manager.status.update(
+                {"remote_uses_ssh": False, "ssh_key_exists": False, "branch": "main"}
+            )
+            manager.command_results = [_cmd(ok=False, stderr="fetch failed")]
+            result = await manager.async_git_setup_pull()
+            self.assertEqual(result["step"], "fetch")
+
+            with self.assertRaisesRegex(ValueError, "Commit message"):
+                await manager.async_git_commit_push(" ", ["configuration.yaml"])
+            with self.assertRaisesRegex(ValueError, "At least one"):
+                await manager.async_git_discard([])
+
+            manager.status_stdout = "?? new.yaml\n M configuration.yaml\n"
+            manager.command_results = [
+                _cmd(stdout=manager.status_stdout),
+                _cmd(ok=False, stderr="restore failed"),
+            ]
+            result = await manager.async_git_discard(["configuration.yaml"])
+            self.assertEqual(result["step"], "restore")
+
+            manager.command_results = [
+                _cmd(stdout=manager.status_stdout),
+                _cmd(ok=True),
+                _cmd(ok=False, stderr="commit failed"),
+            ]
+            result = await manager.async_git_commit_push("Update", ["configuration.yaml"])
+            self.assertEqual(result["step"], "commit")
+
+
 class GitReviewOperationTests(unittest.IsolatedAsyncioTestCase):
     async def test_git_setup_status_requires_origin_remote(self):
         with TemporaryDirectory(dir=CONFIG_TEMP_DIR) as tmp:
@@ -1832,6 +2634,56 @@ class GitReviewOperationTests(unittest.IsolatedAsyncioTestCase):
                 (root / "configuration.yaml").read_text(encoding="utf-8"),
                 "homeassistant:\n  name: Pulled\n",
             )
+
+    async def test_git_setup_change_branch_checks_out_remote_branch(self):
+        with TemporaryDirectory(dir=CONFIG_TEMP_DIR) as tmp:
+            root, remote = _create_git_repo(Path(tmp))
+            upstream = Path(tmp) / "upstream"
+            subprocess.run(
+                ["git", "clone", str(remote), str(upstream)],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            _git(upstream, "checkout", "-b", "dev")
+            (upstream / "configuration.yaml").write_text(
+                "homeassistant:\n  name: Dev\n",
+                encoding="utf-8",
+            )
+            _git(upstream, "commit", "-am", "dev branch")
+            _git(upstream, "push", "origin", "dev")
+            manager = _make_manager(root)
+
+            result = await manager.async_git_setup_change_branch("dev")
+
+            self.assertTrue(result["ok"], result)
+            self.assertEqual(result["step"], "checkout")
+            self.assertEqual(_git(root, "branch", "--show-current").stdout.strip(), "dev")
+            self.assertEqual(
+                (root / "configuration.yaml").read_text(encoding="utf-8"),
+                "homeassistant:\n  name: Dev\n",
+            )
+
+    async def test_git_setup_checkout_commit_restores_previous_config(self):
+        with TemporaryDirectory(dir=CONFIG_TEMP_DIR) as tmp:
+            root, _remote = _create_git_repo(Path(tmp))
+            first_commit = _git(root, "rev-parse", "HEAD").stdout.strip()
+            (root / "configuration.yaml").write_text(
+                "homeassistant:\n  name: Newer\n",
+                encoding="utf-8",
+            )
+            _git(root, "commit", "-am", "newer config")
+            manager = _make_manager(root)
+
+            result = await manager.async_git_setup_checkout_commit(first_commit)
+
+            self.assertTrue(result["ok"], result)
+            self.assertEqual(result["step"], "checkout")
+            self.assertEqual(
+                (root / "configuration.yaml").read_text(encoding="utf-8"),
+                "homeassistant:\n  name: Base\n",
+            )
+            self.assertEqual(_git(root, "rev-parse", "HEAD").stdout.strip(), first_commit)
 
     async def test_commit_push_only_selected_files(self):
         with TemporaryDirectory(dir=CONFIG_TEMP_DIR) as tmp:
@@ -2060,7 +2912,861 @@ class BridgeLogTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["lines"], "")
 
 
+class BridgeControlTests(unittest.IsolatedAsyncioTestCase):
+    async def test_start_bridge_service_uses_health_packaged_and_legacy_paths(self):
+        import custom_components.ha_codex.bridge_control as bridge_control
+
+        original_health = bridge_control._async_bridge_health
+        original_packaged = bridge_control._async_start_packaged_bridge
+        original_legacy = bridge_control._async_run_first_legacy_command
+        try:
+
+            async def healthy():
+                return {"ok": True, "status": 200}
+
+            bridge_control._async_bridge_health = healthy
+            result = await bridge_control.async_start_bridge_service()
+            self.assertTrue(result["already_running"])
+
+            async def unhealthy():
+                return {"ok": False}
+
+            async def packaged_ok(_hass=None):
+                return {"ok": True, "pid": 123}
+
+            bridge_control._async_bridge_health = unhealthy
+            bridge_control._async_start_packaged_bridge = packaged_ok
+            result = await bridge_control.async_start_bridge_service()
+            self.assertEqual(result["pid"], 123)
+
+            async def packaged_failed(_hass=None):
+                return {"ok": False, "error": "packaged failed"}
+
+            async def legacy_ok(_commands):
+                return {"ok": True, "stdout": "started"}
+
+            bridge_control._async_start_packaged_bridge = packaged_failed
+            bridge_control._async_run_first_legacy_command = legacy_ok
+            result = await bridge_control.async_start_bridge_service()
+            self.assertTrue(result["legacy_helper"])
+
+            async def legacy_failed(_commands):
+                return {"ok": False, "error": "legacy failed"}
+
+            bridge_control._async_run_first_legacy_command = legacy_failed
+            result = await bridge_control.async_start_bridge_service()
+            self.assertFalse(result["ok"])
+            self.assertEqual(result["error"], "packaged failed")
+        finally:
+            bridge_control._async_bridge_health = original_health
+            bridge_control._async_start_packaged_bridge = original_packaged
+            bridge_control._async_run_first_legacy_command = original_legacy
+
+    async def test_restart_bridge_service_reports_stopped_pids_and_failures(self):
+        import custom_components.ha_codex.bridge_control as bridge_control
+
+        original_stop = bridge_control._async_stop_bridge_processes
+        original_packaged = bridge_control._async_start_packaged_bridge
+        original_legacy = bridge_control._async_run_first_legacy_command
+        try:
+
+            async def stopped():
+                return {"ok": True, "pids": [101, 102]}
+
+            async def packaged_ok(_hass=None):
+                return {"ok": True, "pid": 103}
+
+            bridge_control._async_stop_bridge_processes = stopped
+            bridge_control._async_start_packaged_bridge = packaged_ok
+            result = await bridge_control.async_restart_bridge_service()
+            self.assertEqual(result["stopped_pids"], [101, 102])
+
+            async def packaged_failed(_hass=None):
+                return {"ok": False, "error": "cannot start"}
+
+            async def legacy_failed(_commands):
+                return {"ok": False, "error": "cannot restart"}
+
+            bridge_control._async_start_packaged_bridge = packaged_failed
+            bridge_control._async_run_first_legacy_command = legacy_failed
+            result = await bridge_control.async_restart_bridge_service()
+            self.assertFalse(result["ok"])
+            self.assertEqual(result["stopped"]["pids"], [101, 102])
+        finally:
+            bridge_control._async_stop_bridge_processes = original_stop
+            bridge_control._async_start_packaged_bridge = original_packaged
+            bridge_control._async_run_first_legacy_command = original_legacy
+
+    async def test_packaged_bridge_start_reports_missing_script_spawn_errors_and_health(self):
+        import custom_components.ha_codex.bridge_control as bridge_control
+
+        original_script = bridge_control.BRIDGE_SCRIPT
+        original_create = bridge_control.asyncio.create_subprocess_exec
+        original_wait = bridge_control._async_wait_for_bridge_health
+        try:
+            with TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                bridge_control.BRIDGE_SCRIPT = root / "missing.py"
+                result = await bridge_control._async_start_packaged_bridge(_FakeHass(root))
+                self.assertFalse(result["ok"])
+                self.assertIn("not found", result["error"])
+
+                script = root / "bridge.py"
+                script.write_text("print('bridge')\n", encoding="utf-8")
+                bridge_control.BRIDGE_SCRIPT = script
+
+                async def spawn_os_error(*_args, **_kwargs):
+                    raise OSError("cannot spawn")
+
+                bridge_control.asyncio.create_subprocess_exec = spawn_os_error
+                result = await bridge_control._async_start_packaged_bridge(_FakeHass(root))
+                self.assertFalse(result["ok"])
+                self.assertEqual(result["error"], "cannot spawn")
+
+                async def spawn_ok(*_args, **_kwargs):
+                    return types.SimpleNamespace(pid=456)
+
+                async def health_ok():
+                    return {"ok": True, "status": 200}
+
+                bridge_control.asyncio.create_subprocess_exec = spawn_ok
+                bridge_control._async_wait_for_bridge_health = health_ok
+                result = await bridge_control._async_start_packaged_bridge(_FakeHass(root))
+                self.assertTrue(result["ok"])
+                self.assertEqual(result["pid"], 456)
+
+                async def health_failed():
+                    return {"ok": False, "error": "timeout"}
+
+                bridge_control._async_wait_for_bridge_health = health_failed
+                result = await bridge_control._async_start_packaged_bridge(_FakeHass(root))
+                self.assertFalse(result["ok"])
+                self.assertEqual(result["error"], "timeout")
+        finally:
+            bridge_control.BRIDGE_SCRIPT = original_script
+            bridge_control.asyncio.create_subprocess_exec = original_create
+            bridge_control._async_wait_for_bridge_health = original_wait
+
+    async def test_process_helpers_parse_pids_run_legacy_commands_and_wait_for_health(self):
+        import custom_components.ha_codex.bridge_control as bridge_control
+
+        original_create = bridge_control.asyncio.create_subprocess_exec
+        original_health = bridge_control._async_bridge_health
+        original_sleep = bridge_control.asyncio.sleep
+        try:
+
+            class FakeProcess:
+                def __init__(self, returncode, stdout=b"", stderr=b""):
+                    self.returncode = returncode
+                    self._stdout = stdout
+                    self._stderr = stderr
+
+                async def communicate(self):
+                    return self._stdout, self._stderr
+
+            async def pgrep_ok(*command, **_kwargs):
+                self.assertEqual(command[:2], ("pgrep", "-f"))
+                return FakeProcess(0, b"123\nbad\n456\n")
+
+            bridge_control.asyncio.create_subprocess_exec = pgrep_ok
+            self.assertEqual(await bridge_control._async_bridge_pids(), [123, 456])
+
+            async def pgrep_missing(*_args, **_kwargs):
+                raise OSError("missing")
+
+            bridge_control.asyncio.create_subprocess_exec = pgrep_missing
+            self.assertEqual(await bridge_control._async_bridge_pids(), [])
+
+            attempts = []
+
+            async def legacy_process(command, **_kwargs):
+                attempts.append(command)
+                if command == "missing":
+                    raise OSError("missing")
+                if command == "fails":
+                    return FakeProcess(1, b"bad stdout", b"bad stderr")
+                return FakeProcess(0, b"ok", b"")
+
+            bridge_control.asyncio.create_subprocess_exec = legacy_process
+            result = await bridge_control._async_run_first_legacy_command(
+                ("missing", "fails", "works")
+            )
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["command"], "works")
+            self.assertEqual(attempts, ["missing", "fails", "works"])
+
+            health_results = iter([{"ok": False}, {"ok": True, "status": 200}])
+
+            async def health_sequence():
+                return next(health_results)
+
+            async def no_sleep(_delay):
+                return None
+
+            bridge_control._async_bridge_health = health_sequence
+            bridge_control.asyncio.sleep = no_sleep
+            self.assertEqual(
+                await bridge_control._async_wait_for_bridge_health(), {"ok": True, "status": 200}
+            )
+        finally:
+            bridge_control.asyncio.create_subprocess_exec = original_create
+            bridge_control._async_bridge_health = original_health
+            bridge_control.asyncio.sleep = original_sleep
+
+    async def test_bridge_health_config_dir_and_stop_process_helpers_are_bounded(self):
+        import custom_components.ha_codex.bridge_control as bridge_control
+
+        original_urlopen = bridge_control.urlopen
+        original_pids = bridge_control._async_bridge_pids
+        original_getpid = bridge_control.os.getpid
+        original_kill = bridge_control.os.kill
+        original_exists = bridge_control._pid_exists
+        original_sleep = bridge_control.asyncio.sleep
+        try:
+
+            class FakeResponse:
+                status = 200
+
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *_args):
+                    return False
+
+            bridge_control.urlopen = lambda *_args, **_kwargs: FakeResponse()
+            self.assertEqual(
+                await bridge_control._async_bridge_health(), {"ok": True, "status": 200}
+            )
+
+            def raise_url_error(*_args, **_kwargs):
+                raise OSError("offline")
+
+            bridge_control.urlopen = raise_url_error
+            result = await bridge_control._async_bridge_health()
+            self.assertFalse(result["ok"])
+            self.assertIn("offline", result["error"])
+
+            self.assertEqual(bridge_control._config_dir(_FakeHass("/config")), Path("/config"))
+
+            async def pids():
+                return [999, 1000]
+
+            killed = []
+            bridge_control._async_bridge_pids = pids
+            bridge_control.os.getpid = lambda: 999
+            bridge_control.os.kill = lambda pid, sig: killed.append((pid, sig))
+            bridge_control._pid_exists = lambda _pid: False
+            bridge_control.asyncio.sleep = lambda _delay: _async_noop()
+            result = await bridge_control._async_stop_bridge_processes()
+            self.assertEqual(result["pids"], [1000])
+            self.assertEqual(killed, [(1000, bridge_control.signal.SIGTERM)])
+
+            bridge_control.os.kill = lambda _pid, _sig: (_ for _ in ()).throw(ProcessLookupError())
+            self.assertEqual(bridge_control._pid_exists(123), False)
+        finally:
+            bridge_control.urlopen = original_urlopen
+            bridge_control._async_bridge_pids = original_pids
+            bridge_control.os.getpid = original_getpid
+            bridge_control.os.kill = original_kill
+            bridge_control._pid_exists = original_exists
+            bridge_control.asyncio.sleep = original_sleep
+
+
+class WebsocketCommandTests(unittest.IsolatedAsyncioTestCase):
+    async def test_websocket_commands_delegate_to_manager(self):
+        websocket = _load_websocket_module()
+        manager = _FakeWebsocketManager()
+        websocket.CodexManager = _FakeWebsocketManager
+        hass = types.SimpleNamespace(data={websocket.DOMAIN: manager}, registered_commands=[])
+        connection = _FakeConnection()
+
+        websocket.async_register_commands(hass)
+        self.assertGreaterEqual(len(hass.registered_commands), 40)
+
+        await websocket.websocket_status(hass, connection, {"id": 1})
+        await websocket.websocket_settings_get(hass, connection, {"id": 2})
+        await websocket.websocket_settings_update(
+            hass, connection, {"id": 3, "settings": {"plan": "auto"}}
+        )
+        await websocket.websocket_bridge_log(hass, connection, {"id": 4, "lines": 25})
+        await websocket.websocket_bridge_log_clear(hass, connection, {"id": 5})
+        await websocket.websocket_bridge_restart(hass, connection, {"id": 6})
+        await websocket.websocket_core_restart(hass, connection, {"id": 7})
+        await websocket.websocket_account_status(hass, connection, {"id": 8})
+        await websocket.websocket_account_device_login_start(hass, connection, {"id": 9})
+        await websocket.websocket_account_device_login_status(hass, connection, {"id": 10})
+        await websocket.websocket_account_device_login_cancel(hass, connection, {"id": 11})
+        await websocket.websocket_account_logout(hass, connection, {"id": 12})
+        await websocket.websocket_context_logs(hass, connection, {"id": 13, "lines": 50})
+        await websocket.websocket_context_config_files(hass, connection, {"id": 14})
+        await websocket.websocket_context_config_file(
+            hass,
+            connection,
+            {"id": 15, "path": "configuration.yaml"},
+        )
+        websocket.websocket_sessions_list(hass, connection, {"id": 16})
+        websocket.websocket_sessions_last_message_id(
+            hass,
+            connection,
+            {"id": 17, "session_id": "session-1"},
+        )
+        websocket.websocket_sessions_message(
+            hass,
+            connection,
+            {"id": 18, "session_id": "session-1", "message_id": 2},
+        )
+        websocket.websocket_sessions_messages_after(
+            hass,
+            connection,
+            {"id": 19, "session_id": "session-1", "after_id": 1, "limit": 3},
+        )
+        await websocket.websocket_sessions_create(hass, connection, {"id": 20, "title": "New"})
+        await websocket.websocket_sessions_send(
+            hass,
+            connection,
+            {
+                "id": 21,
+                "session_id": "session-1",
+                "prompt": "Fix it",
+                "context": [{"kind": "entity"}],
+                "run_prompt": "Run this",
+                "metadata": {"source": "test"},
+                "run_settings": {"model": "gpt-5"},
+            },
+        )
+        await websocket.websocket_sessions_run_settings_update(
+            hass,
+            connection,
+            {"id": 22, "session_id": "session-1", "run_settings": {"model": "gpt-5"}},
+        )
+        await websocket.websocket_sessions_run_plan_respond(
+            hass,
+            connection,
+            {"id": 23, "session_id": "session-1", "plan_id": "plan-1", "action": "approve"},
+        )
+        await websocket.websocket_sessions_rollback_run(
+            hass,
+            connection,
+            {"id": 24, "session_id": "session-1", "checkpoint_id": "checkpoint-1"},
+        )
+        await websocket.websocket_sessions_steer(
+            hass,
+            connection,
+            {
+                "id": 25,
+                "session_id": "session-1",
+                "prompt": "Continue",
+                "context": [],
+                "run_prompt": "Continue run",
+                "metadata": {},
+                "run_settings": {},
+            },
+        )
+        await websocket.websocket_sessions_retry_continue(
+            hass,
+            connection,
+            {"id": 26, "session_id": "session-1"},
+        )
+        await websocket.websocket_sessions_cancel(
+            hass, connection, {"id": 27, "session_id": "session-1"}
+        )
+        await websocket.websocket_sessions_rename(
+            hass,
+            connection,
+            {"id": 28, "session_id": "session-1", "title": "Renamed"},
+        )
+        await websocket.websocket_sessions_delete(
+            hass,
+            connection,
+            {"id": 29, "session_id": "session-1"},
+        )
+        await websocket.websocket_sessions_archive(
+            hass,
+            connection,
+            {"id": 30, "session_id": "session-1", "archived": True},
+        )
+        await websocket.websocket_sessions_archive(
+            hass,
+            connection,
+            {"id": 31, "session_id": "delete-me", "archived": True},
+        )
+        await websocket.websocket_approvals_respond(
+            hass,
+            connection,
+            {"id": 32, "session_id": "session-1", "approval_id": "approval-1", "approved": True},
+        )
+        await websocket.websocket_git_status(hass, connection, {"id": 33})
+        await websocket.websocket_git_setup_status(hass, connection, {"id": 34})
+        await websocket.websocket_git_setup_generate_key(hass, connection, {"id": 35})
+        await websocket.websocket_git_setup_set_remote(
+            hass,
+            connection,
+            {"id": 36, "remote_url": "git@example.com:repo.git"},
+        )
+        await websocket.websocket_git_setup_pull(hass, connection, {"id": 37})
+        await websocket.websocket_git_setup_change_branch(
+            hass,
+            connection,
+            {"id": 38, "branch": "main"},
+        )
+        await websocket.websocket_git_setup_checkout_commit(
+            hass,
+            connection,
+            {"id": 39, "commit": "abc123d"},
+        )
+        await websocket.websocket_git_diff(hass, connection, {"id": 40})
+        await websocket.websocket_git_changes(hass, connection, {"id": 41})
+        await websocket.websocket_git_file_diff(
+            hass,
+            connection,
+            {"id": 42, "path": "configuration.yaml", "old_path": "old.yaml"},
+        )
+        await websocket.websocket_git_commit_push(
+            hass,
+            connection,
+            {"id": 43, "message": "Update config", "files": ["configuration.yaml"]},
+        )
+        await websocket.websocket_git_discard(
+            hass,
+            connection,
+            {"id": 44, "files": [{"path": "configuration.yaml"}]},
+        )
+        await websocket.websocket_validation_run(
+            hass, connection, {"id": 45, "session_id": "session-1"}
+        )
+        await websocket.websocket_validation_reload(
+            hass,
+            connection,
+            {"id": 46, "domains": ["automation"]},
+        )
+
+        results = dict(connection.results)
+        self.assertEqual(results[1], {"status": "ok"})
+        self.assertEqual(results[3], {"settings": {"plan": "auto"}})
+        self.assertEqual(results[15]["path"], "configuration.yaml")
+        self.assertEqual(results[17], {"last_message_id": 2})
+        self.assertEqual(results[21], {"session": {"id": "session-1", "payload": True}})
+        self.assertEqual(results[24], {"rolled_back": "checkpoint-1"})
+        self.assertEqual(results[29], {"deleted_session_id": "session-1"})
+        self.assertEqual(results[31], {"deleted_session_id": "delete-me"})
+        self.assertEqual(results[36]["remote_url"], "git@example.com:repo.git")
+        self.assertEqual(results[38]["branch"], "main")
+        self.assertEqual(results[39]["commit"], "abc123d")
+        self.assertEqual(results[42]["old_path"], "old.yaml")
+        self.assertEqual(results[45]["validation"]["status"], "passed")
+        self.assertIn(("send", "session-1", "Fix it", "Run this"), manager.calls)
+
+    async def test_websocket_errors_raise_homeassistant_error(self):
+        websocket = _load_websocket_module()
+        manager = _FakeWebsocketManager()
+        websocket.CodexManager = _FakeWebsocketManager
+        hass = types.SimpleNamespace(data={websocket.DOMAIN: manager})
+        connection = _FakeConnection()
+
+        with self.assertRaises(websocket.HomeAssistantError):
+            websocket._manager(types.SimpleNamespace(data={}))
+
+        with self.assertRaises(websocket.HomeAssistantError):
+            await websocket.websocket_settings_update(
+                hass,
+                connection,
+                {"id": 1, "settings": {"raise": True}},
+            )
+
+        with self.assertRaises(websocket.HomeAssistantError):
+            websocket.websocket_sessions_last_message_id(
+                hass,
+                connection,
+                {"id": 2, "session_id": "missing"},
+            )
+
+        with self.assertRaises(websocket.HomeAssistantError):
+            await websocket.websocket_context_config_file(
+                hass,
+                connection,
+                {"id": 3, "path": "../secrets.yaml"},
+            )
+
+
+class ManagerUtilityTests(unittest.IsolatedAsyncioTestCase):
+    async def test_settings_probe_bridge_and_restart_helpers(self):
+        import custom_components.ha_codex.manager as manager_module
+
+        with TemporaryDirectory(dir=CONFIG_TEMP_DIR) as tmp:
+            root = Path(tmp)
+            manager = CodexManager(
+                _FakeHass(root),
+                _MemoryStore(),
+                workspace_path=str(root),
+                codex_command="codex",
+                bridge_url=None,
+                addon_write_scope="all_visible",
+                validation_command="auto",
+            )
+
+            self.assertEqual(await manager.async_get_settings(), manager.settings)
+            updated = await manager.async_update_settings({"defaults": {"plan_mode": "always"}})
+            self.assertEqual(updated["defaults"]["plan_mode"], "always")
+
+            original_which = manager_module.which
+            original_discover_addons = manager_module.discover_addon_paths
+            original_discover_validation = manager_module.discover_validation_command
+            try:
+                manager_module.which = lambda command: f"/usr/bin/{command}"
+                manager_module.discover_addon_paths = lambda _scope: ["/addons"]
+                manager_module.discover_validation_command = lambda _config, config_path: [
+                    "ha",
+                    "core",
+                    "check",
+                    "--config",
+                    config_path,
+                ]
+
+                async def small_command(command):
+                    stdout = "codex 1.2.3\n" if "--version" in command else "Usage: codex exec\n"
+                    return {"ok": True, "returncode": 0, "stdout": stdout, "stderr": ""}
+
+                manager._run_small_command = small_command
+                status = await manager.async_probe()
+                self.assertEqual(status["runner_type"], "direct")
+                self.assertEqual(status["codex_version"], "codex 1.2.3")
+                self.assertEqual(status["addon_paths"], ["/addons"])
+            finally:
+                manager_module.which = original_which
+                manager_module.discover_addon_paths = original_discover_addons
+                manager_module.discover_validation_command = original_discover_validation
+
+            log_result = await manager.async_clear_bridge_log()
+            self.assertTrue(log_result["exists"])
+            self.assertEqual((root / "ha_codex_bridge.log").read_text(encoding="utf-8"), "")
+
+            manager._async_build_frontend_for_restart = lambda: _async_value({"ok": False})
+            restart = await manager.async_restart_core()
+            self.assertFalse(restart["ok"])
+            self.assertEqual(manager.hass.services.calls, [])
+
+            manager._async_build_frontend_for_restart = lambda: _async_value({"ok": True})
+            restart = await manager.async_restart_core()
+            self.assertTrue(restart["ok"])
+            self.assertEqual(manager.hass.services.calls[-1][0:2], ("homeassistant", "restart"))
+
+            self.assertFalse((await manager.async_start_bridge())["ok"])
+
+            manager.bridge_url = "http://127.0.0.1:8765"
+            original_start_bridge = manager_module.async_start_bridge_service
+            try:
+                manager_module.async_start_bridge_service = lambda _hass: _async_value(
+                    {"ok": True, "already_running": True}
+                )
+                self.assertTrue((await manager.async_start_bridge())["already_running"])
+
+                manager_module.async_start_bridge_service = lambda _hass: _async_value(
+                    {"ok": False, "error": "start failed"}
+                )
+                manager.async_restart_bridge = lambda: _async_value({"ok": True})
+                fallback = await manager.async_start_bridge()
+                self.assertTrue(fallback["started_by_fallback"])
+
+                manager.async_restart_bridge = lambda: _async_value(
+                    {"ok": False, "error": "restart failed"}
+                )
+                failed = await manager.async_start_bridge()
+                self.assertFalse(failed["ok"])
+                self.assertEqual(failed["error"], "restart failed")
+            finally:
+                manager_module.async_start_bridge_service = original_start_bridge
+
+    async def test_bridge_json_usage_and_health_helpers_handle_payload_variants(self):
+        manager = CodexManager(
+            _FakeHass("/tmp"),
+            store=None,
+            workspace_path="/homeassistant",
+            codex_command="codex",
+            bridge_url=None,
+            addon_write_scope=None,
+            validation_command=None,
+        )
+
+        self.assertFalse((await manager._async_usage_status())["ok"])
+        self.assertFalse((await manager._async_bridge_json("GET", "/status"))["ok"])
+        self.assertFalse((await manager._async_bridge_health_status())["ok"])
+
+        manager.bridge_url = "http://127.0.0.1:8765"
+        original_aiohttp = sys.modules.get("aiohttp")
+        aiohttp, responses = _install_aiohttp_json_stub(
+            [
+                {
+                    "payload": {
+                        "ok": True,
+                        "five_hour_remaining_percent": 80,
+                        "weekly_remaining_percent": 65,
+                        "five_hour_reset_at": "soon",
+                        "weekly_reset_at": "later",
+                    }
+                },
+                {"payload": ["invalid"]},
+                {"payload": {"ok": True, "authenticated": False}},
+                {"status": 400, "payload": {"error": "bad request"}},
+                {"json_error": ValueError("invalid json")},
+                {"payload": ["invalid"]},
+                {"raise": None},
+                {
+                    "payload": {
+                        "ok": True,
+                        "config_dir": "/config",
+                        "codex_home": "/config/codex_home",
+                        "codex_home_exists": True,
+                        "started_at": 1_700_000_000,
+                        "uptime_seconds": 42,
+                    }
+                },
+                {"payload": ["invalid"]},
+                {"json_error": ValueError("invalid health json")},
+            ]
+        )
+        responses[6]["raise"] = aiohttp.ClientError("offline")
+        try:
+            usage = await manager._async_usage_status()
+            self.assertTrue(usage["ok"])
+            self.assertEqual(usage["five_hour_remaining_percent"], 80)
+
+            invalid_usage = await manager._async_usage_status()
+            self.assertFalse(invalid_usage["ok"])
+            self.assertIn("invalid usage", invalid_usage["error"])
+
+            account = await manager.async_account_status()
+            self.assertTrue(account["ok"])
+            start = await manager.async_account_device_login_start()
+            self.assertFalse(start["ok"])
+            self.assertEqual(start["error"], "bad request")
+            status = await manager.async_account_device_login_status()
+            self.assertFalse(status["ok"])
+            self.assertIn("invalid JSON", status["error"])
+            cancel = await manager.async_account_device_login_cancel()
+            self.assertFalse(cancel["ok"])
+            self.assertIn("invalid response", cancel["error"])
+            logout = await manager.async_account_logout()
+            self.assertFalse(logout["ok"])
+            self.assertEqual(logout["error"], "offline")
+
+            health = await manager._async_bridge_health_status()
+            self.assertTrue(health["ok"])
+            self.assertEqual(health["uptime_seconds"], 42)
+            invalid_health = await manager._async_bridge_health_status()
+            self.assertFalse(invalid_health["ok"])
+            self.assertIn("invalid health", invalid_health["error"])
+            failed_health = await manager._async_bridge_health_status()
+            self.assertFalse(failed_health["ok"])
+            self.assertIn("invalid health json", failed_health["error"])
+        finally:
+            if original_aiohttp is None:
+                sys.modules.pop("aiohttp", None)
+            else:
+                sys.modules["aiohttp"] = original_aiohttp
+
+    async def test_session_lifecycle_error_and_retry_paths(self):
+        with TemporaryDirectory(dir=CONFIG_TEMP_DIR) as tmp:
+            manager = _make_manager(Path(tmp))
+            manager.store = _MemoryStore()
+            session = await manager.async_create_session("Lifecycle")
+
+            with self.assertRaisesRegex(ValueError, "Unknown session"):
+                await manager.async_send("missing", "hello")
+            with self.assertRaisesRegex(ValueError, "Prompt is required"):
+                await manager.async_send(session.id, "   ")
+
+            session.metadata["pending_plan"] = {"id": "plan-1", "status": "pending"}
+            with self.assertRaisesRegex(ValueError, "Run plan is awaiting approval"):
+                await manager.async_send(session.id, "another prompt")
+            session.metadata.pop("pending_plan")
+
+            with self.assertRaisesRegex(ValueError, "active run"):
+                await manager.async_steer(session.id, "continue")
+            with self.assertRaisesRegex(ValueError, "Prompt is required"):
+                await manager.async_steer(session.id, " ")
+            with self.assertRaisesRegex(ValueError, "Only errored"):
+                await manager.async_retry_continue(session.id)
+
+            session.status = "error"
+            with self.assertRaisesRegex(ValueError, "No previous user prompt"):
+                await manager.async_retry_continue(session.id)
+
+            manager._append_message(session, ChatMessage(role="user", content="Fix config"))
+            manager._async_begin_run_tracking = lambda _session_id: _async_noop()
+            manager._async_run_session = lambda *_args, **_kwargs: _async_noop()
+            retried = await manager.async_retry_continue(session.id)
+            self.assertEqual(retried.status, "running")
+            self.assertEqual(retried.messages[-1].metadata["kind"], "retry_continue")
+
+            task = _FakeTask()
+            manager.tasks[session.id] = task
+            canceled = await manager.async_cancel(session.id)
+            self.assertTrue(task.cancelled)
+            self.assertEqual(canceled.status, "canceled")
+
+            renamed = await manager.async_rename(session.id, "  ")
+            self.assertEqual(renamed.title, "New chat")
+
+            approval = PendingApproval(
+                id="approval-1", session_id=session.id, command="cat configuration.yaml"
+            )
+            session.approvals.append(approval)
+            result = await manager.async_respond_approval(session.id, approval.id, False)
+            self.assertEqual(result.approvals[-1].status, "rejected")
+            with self.assertRaisesRegex(ValueError, "Unknown approval"):
+                await manager.async_respond_approval(session.id, "missing", True)
+
+            task = _FakeTask()
+            manager.tasks[session.id] = task
+            await manager.async_delete(session.id)
+            self.assertTrue(task.cancelled)
+            self.assertNotIn(session.id, manager.sessions)
+
+    async def test_validation_reload_message_and_command_helpers(self):
+        with TemporaryDirectory(dir=CONFIG_TEMP_DIR) as tmp:
+            root = Path(tmp)
+            manager = _make_manager(root)
+            manager.store = _MemoryStore()
+            session = await manager.async_create_session("Validation")
+
+            manager.validation_command = None
+            result = await manager.async_validate()
+            self.assertEqual(result.status, "unavailable")
+
+            manager.validation_command = ["ha", "core", "check"]
+
+            async def run_command(_command, **_kwargs):
+                return {"ok": True, "returncode": 0, "stdout": "valid", "stderr": ""}
+
+            manager._run_command = run_command
+            result = await manager.async_validate(
+                session.id, changed_files=[{"path": "automations.yaml"}]
+            )
+            self.assertEqual(result.status, "passed")
+            self.assertEqual(session.validation.status, "passed")
+            self.assertEqual(session.messages[-1].metadata["kind"], "validation_summary")
+
+            with self.assertRaisesRegex(ValueError, "At least one"):
+                await manager.async_reload_validation_domains([" ", ""])
+            with self.assertRaisesRegex(ValueError, "Cannot safely reload"):
+                await manager.async_reload_validation_domains(["core"])
+
+            reload_result = await manager.async_reload_validation_domains(
+                ["automations", "automations", "scripts"]
+            )
+            self.assertEqual(reload_result["domains"], ["automations", "scripts"])
+            self.assertEqual(len(manager.hass.services.calls), 2)
+
+            event = NormalizedEvent(kind="approval_required", command="ha core restart", raw={})
+            self.assertIn("ha core restart", manager._message_for_event(event).content)
+            event = NormalizedEvent(kind="run_finished", text="Done", raw={})
+            self.assertEqual(manager._message_for_event(event).content, "Done")
+            event = NormalizedEvent(
+                kind="file_event", text="", file_changes=[{"path": "a.yaml"}], raw={}
+            )
+            self.assertEqual(
+                manager._message_for_event(event).metadata["file_changes"][0]["path"], "a.yaml"
+            )
+            event = NormalizedEvent(kind="note", text="Plain event", raw={})
+            self.assertEqual(manager._message_for_event(event).content, "Plain event")
+            event = NormalizedEvent(kind="session_started", raw={})
+            self.assertIsNone(manager._message_for_event(event))
+
+            self.assertIn("` ` `", manager._format_command_message("echo ```"))
+            completed = await CodexManager._run_command(
+                manager,
+                [sys.executable, "-c", "print('ok')"],
+                cwd=None,
+                timeout=10,
+            )
+            self.assertTrue(completed["ok"])
+            self.assertEqual(completed["stdout"].strip(), "ok")
+
+            self.assertFalse(manager._requires_run_plan(""))
+            self.assertFalse(manager._requires_run_plan("Answer to your question: yes"))
+            self.assertTrue(
+                manager._should_validate_after_run(
+                    {"validation_depth": "auto"},
+                    [{"path": "configuration.yaml"}],
+                )
+            )
+            self.assertFalse(
+                manager._should_validate_after_run(
+                    {"validation_depth": "none"},
+                    [{"path": "configuration.yaml"}],
+                )
+            )
+            self.assertTrue(manager._should_validate_after_run({"validation_depth": "full"}, []))
+
+
 class ContextTests(unittest.IsolatedAsyncioTestCase):
+    async def test_context_attachment_preparation_filters_duplicates_and_truncates_prompt_context(
+        self,
+    ):
+        with TemporaryDirectory(dir=CONFIG_TEMP_DIR) as tmp:
+            root = Path(tmp)
+            (root / "configuration.yaml").write_text(
+                "homeassistant:\n  name: Test\n", encoding="utf-8"
+            )
+            (root / "home-assistant.log").write_text("one\ntwo\n", encoding="utf-8")
+            manager = _make_manager(root)
+
+            attachments, serialized = manager._prepare_context_attachments("not-a-list")
+            self.assertEqual(attachments, [])
+            self.assertEqual(serialized, "")
+
+            selected = [
+                "invalid",
+                {"kind": "unknown", "id": "x", "label": "Unknown"},
+                {"kind": "entity", "id": "", "label": "Missing id"},
+                {
+                    "kind": "entity",
+                    "id": "light.kitchen",
+                    "label": "Kitchen Light",
+                    "subtitle": "on",
+                    "payload": {"state": "on"},
+                },
+                {
+                    "kind": "entity",
+                    "id": "light.kitchen",
+                    "label": "Kitchen Light duplicate",
+                },
+                {
+                    "kind": "config_file",
+                    "id": "configuration.yaml",
+                    "label": "Config",
+                    "payload": {"path": "configuration.yaml"},
+                },
+                {"kind": "log", "id": "home_assistant", "label": "HA log"},
+                {"kind": "log", "id": "missing", "label": "Missing log"},
+            ]
+
+            attachments, serialized = manager._prepare_context_attachments(selected)
+
+            self.assertEqual(
+                [item["kind"] for item in attachments], ["entity", "config_file", "log"]
+            )
+            self.assertEqual(attachments[0]["subtitle"], "on")
+            self.assertIn("Kitchen Light", serialized)
+            self.assertIn("homeassistant", serialized)
+            self.assertIn("one\\ntwo", serialized)
+
+            prompt = manager._compose_prompt_with_context("Do it", "x" * 100_000)
+            self.assertIn("User request:\nDo it", prompt)
+            self.assertIn("[context truncated]", prompt)
+            self.assertEqual(manager._compose_prompt_with_context("  Do it  ", ""), "Do it")
+            self.assertEqual(
+                manager._compose_prompt_with_context("x" * 100_000, "context"),
+                f"User request:\n{'x' * 100_000}",
+            )
+
+            self.assertEqual(
+                manager._display_context_path(root / "configuration.yaml"), "configuration.yaml"
+            )
+            self.assertFalse(manager._is_context_config_file(root / "secrets.yaml"))
+            self.assertFalse(manager._is_context_config_file(root / ".storage" / "core.config"))
+            self.assertTrue(manager._is_context_config_file(root / ".gitignore"))
+
     async def test_context_config_files_exclude_sensitive_and_noisy_paths(self):
         with TemporaryDirectory(dir=CONFIG_TEMP_DIR) as tmp:
             root = Path(tmp)
@@ -2314,6 +4020,529 @@ def _make_manager(root: Path) -> CodexManager:
     )
 
 
+def _load_websocket_module():
+    _install_websocket_stubs()
+    import custom_components.ha_codex.websocket as websocket
+
+    return importlib.reload(websocket)
+
+
+def _install_websocket_stubs() -> None:
+    if "voluptuous" not in sys.modules:
+        vol = types.ModuleType("voluptuous")
+        vol.Required = lambda key, *_args, **_kwargs: key
+        vol.Optional = lambda key, *_args, **_kwargs: key
+        vol.Coerce = lambda target: target
+        vol.Range = lambda *_args, **_kwargs: lambda value: value
+        vol.In = lambda values: lambda value: value if value in values else value
+        vol.All = lambda *validators: lambda value: value
+        vol.Any = lambda *validators: validators[0] if validators else object()
+        sys.modules["voluptuous"] = vol
+
+    if "homeassistant" not in sys.modules:
+        sys.modules["homeassistant"] = types.ModuleType("homeassistant")
+    if "homeassistant.components" not in sys.modules:
+        sys.modules["homeassistant.components"] = types.ModuleType("homeassistant.components")
+
+    websocket_api = types.ModuleType("homeassistant.components.websocket_api")
+    websocket_api.ActiveConnection = object
+    websocket_api.async_register_command = lambda hass, command: hass.registered_commands.append(
+        command
+    )
+    websocket_api.websocket_command = lambda _schema: lambda func: func
+    websocket_api.require_admin = lambda func: func
+    websocket_api.async_response = lambda func: func
+    sys.modules["homeassistant.components.websocket_api"] = websocket_api
+
+    core = types.ModuleType("homeassistant.core")
+    core.HomeAssistant = object
+    sys.modules["homeassistant.core"] = core
+
+    exceptions = types.ModuleType("homeassistant.exceptions")
+
+    class HomeAssistantError(Exception):
+        pass
+
+    exceptions.HomeAssistantError = HomeAssistantError
+    sys.modules["homeassistant.exceptions"] = exceptions
+
+
+class _FakeConnection:
+    def __init__(self):
+        self.results = []
+
+    def send_result(self, msg_id, result):
+        self.results.append((msg_id, result))
+
+
+class _FakeWebsocketManager:
+    def __init__(self):
+        self.calls = []
+        self.session = {"id": "session-1"}
+
+    async def async_status(self):
+        return {"status": "ok"}
+
+    async def async_get_settings(self):
+        return {"plan": "auto"}
+
+    async def async_update_settings(self, settings):
+        if settings.get("raise"):
+            raise ValueError("invalid settings")
+        return settings
+
+    async def async_bridge_log(self, lines):
+        return {"lines": lines}
+
+    async def async_clear_bridge_log(self):
+        return {"cleared": True}
+
+    async def async_restart_bridge(self):
+        return {"restarted": True}
+
+    async def async_restart_core(self):
+        return {"restarted": "core"}
+
+    async def async_account_status(self):
+        return {"logged_in": False}
+
+    async def async_account_device_login_start(self):
+        return {"started": True}
+
+    async def async_account_device_login_status(self):
+        return {"status": "pending"}
+
+    async def async_account_device_login_cancel(self):
+        return {"cancelled": True}
+
+    async def async_account_logout(self):
+        return {"logged_out": True}
+
+    async def async_context_logs(self, lines):
+        return {"logs": "", "lines": lines}
+
+    async def async_context_config_files(self):
+        return [{"path": "configuration.yaml"}]
+
+    async def async_context_config_file(self, path):
+        if path.startswith(".."):
+            raise ValueError("unsafe path")
+        return {"path": path, "content": "homeassistant:\n"}
+
+    def list_sessions(self):
+        return [self.session]
+
+    def last_message_id(self, session_id):
+        if session_id == "missing":
+            raise ValueError("missing session")
+        return 2
+
+    def get_message(self, session_id, message_id):
+        return {"session_id": session_id, "id": message_id}
+
+    def messages_after(self, session_id, after_id, limit):
+        return [{"session_id": session_id, "after_id": after_id, "limit": limit}]
+
+    async def async_create_session(self, title):
+        return {"id": "created", "title": title}
+
+    def session_payload(self, session):
+        return {"id": session["id"], "payload": True}
+
+    async def async_send(self, session_id, prompt, **kwargs):
+        self.calls.append(("send", session_id, prompt, kwargs.get("run_prompt")))
+        return self.session
+
+    async def async_update_session_run_settings(self, session_id, run_settings):
+        self.calls.append(("run_settings", session_id, run_settings))
+        return self.session
+
+    async def async_respond_run_plan(self, session_id, plan_id, action):
+        self.calls.append(("run_plan", session_id, plan_id, action))
+        return self.session
+
+    async def async_rollback_run(self, _session_id, checkpoint_id):
+        return {"rolled_back": checkpoint_id}
+
+    async def async_steer(self, session_id, prompt, **kwargs):
+        self.calls.append(("steer", session_id, prompt, kwargs.get("run_prompt")))
+        return self.session
+
+    async def async_retry_continue(self, session_id):
+        self.calls.append(("retry", session_id))
+        return self.session
+
+    async def async_cancel(self, session_id):
+        self.calls.append(("cancel", session_id))
+        return self.session
+
+    async def async_rename(self, session_id, title):
+        self.calls.append(("rename", session_id, title))
+        return self.session
+
+    async def async_delete(self, session_id):
+        self.calls.append(("delete", session_id))
+
+    async def async_archive(self, session_id, archived):
+        self.calls.append(("archive", session_id, archived))
+        if session_id == "delete-me":
+            return None
+        return self.session
+
+    async def async_respond_approval(self, session_id, approval_id, approved):
+        self.calls.append(("approval", session_id, approval_id, approved))
+        return self.session
+
+    async def async_git_status(self):
+        return {"files": []}
+
+    async def async_git_setup_status(self):
+        return {"setup_complete": True}
+
+    async def async_git_setup_generate_key(self):
+        return {"public_key": "ssh-ed25519 AAA"}
+
+    async def async_git_setup_set_remote(self, remote_url):
+        return {"remote_url": remote_url}
+
+    async def async_git_setup_pull(self):
+        return {"pulled": True}
+
+    async def async_git_setup_change_branch(self, branch):
+        return {"branch": branch}
+
+    async def async_git_setup_checkout_commit(self, commit):
+        return {"commit": commit}
+
+    async def async_git_diff(self):
+        return {"diff": ""}
+
+    async def async_git_changes(self):
+        return {"files": []}
+
+    async def async_git_file_diff(self, path, old_path=None):
+        return {"path": path, "old_path": old_path}
+
+    async def async_git_commit_push(self, message, files):
+        return {"message": message, "files": files}
+
+    async def async_git_discard(self, files):
+        return {"discarded": files}
+
+    async def async_validate(self, session_id=None):
+        return ValidationResult(status="passed", command=["ha", "core", "check"], returncode=0)
+
+    async def async_reload_validation_domains(self, domains):
+        return {"domains": domains}
+
+
+class _FakeSetupHass:
+    def __init__(self, root):
+        self.config = _FakeConfig(root)
+        self.bus = _FakeBus()
+        self.services = _FakeServices()
+        self.loop = _FakeLoop()
+        self.data = {}
+        self.http = _FakeHttp()
+        self.config_entries = _FakeConfigEntries()
+        self.created_tasks = []
+
+    def async_create_task(self, coro, _name=None):
+        self.created_tasks.append(coro)
+        if hasattr(coro, "close"):
+            coro.close()
+        return _FakeTask(done=True)
+
+
+class _FakeHttp:
+    def __init__(self):
+        self.static_paths = []
+
+    async def async_register_static_paths(self, paths):
+        self.static_paths.extend(paths)
+
+
+class _FakeConfigEntries:
+    def __init__(self):
+        self.entries = []
+        self.flow = _FakeConfigFlow()
+        self.reloads = []
+
+    def async_entries(self, domain):
+        return self.entries if domain == "ha_codex" else []
+
+    async def async_reload(self, entry_id):
+        self.reloads.append(entry_id)
+
+
+class _FakeConfigFlow:
+    def __init__(self):
+        self.calls = []
+
+    def async_init(self, domain, context=None, data=None):
+        self.calls.append((domain, context, data))
+        return _async_value({"type": "create_entry"})
+
+
+class _FakeConfigEntry:
+    def __init__(self, data=None, options=None):
+        self.data = data or {}
+        self.options = options or {}
+        self.entry_id = "entry-1"
+        self.unloads = []
+
+    def add_update_listener(self, listener):
+        return ("listener", listener)
+
+    def async_on_unload(self, unload):
+        self.unloads.append(unload)
+
+
+class _FakeRuntimeManager:
+    def __init__(
+        self,
+        hass,
+        store,
+        *,
+        workspace_path,
+        codex_command,
+        bridge_url,
+        addon_write_scope,
+        validation_command,
+    ):
+        self.hass = hass
+        self.store = store
+        self.workspace_path = workspace_path
+        self.codex_command = codex_command
+        self.bridge_url = bridge_url
+        self.addon_write_scope = addon_write_scope
+        self.validation_command = validation_command
+        self.loaded = False
+        self.started_bridge = False
+        self.tasks = {"run": _FakeTask()}
+
+    async def async_load(self):
+        self.loaded = True
+
+    async def async_start_bridge(self):
+        self.started_bridge = True
+        return {"ok": False, "error": "offline"}
+
+
+class _FakeGitOpsManager(GitOperationsMixin):
+    def __init__(self, root: Path):
+        self.hass = _FakeHass(root)
+        self.workspace_path = str(root)
+        self.command_results = []
+        self.commands = []
+        self.head_paths = set()
+        self.status_stdout = ""
+        self.status = {
+            "git_available": True,
+            "repository": True,
+            "branch": "main",
+            "remote_configured": True,
+            "remote_uses_ssh": False,
+            "ssh_key_exists": False,
+        }
+
+    async def _run_command(self, command, **_kwargs):
+        self.commands.append(command)
+        if self.command_results:
+            return self.command_results.pop(0)
+        if "status" in command:
+            return _cmd(stdout=self.status_stdout)
+        return _cmd()
+
+    async def async_git_setup_status(self):
+        return dict(self.status)
+
+    def _head_path_exists(self, path: str) -> bool:
+        return path in self.head_paths
+
+    def _git_work_tree_from_command(self) -> str:
+        return self.hass.config.path()
+
+
+def _cmd(ok=True, stdout="", stderr="", returncode=0):
+    return {"ok": ok, "stdout": stdout, "stderr": stderr, "returncode": returncode}
+
+
+def _install_runtime_setup_stubs():
+    _install_websocket_stubs()
+    calls = {"panels": [], "commands": [], "removed_panels": []}
+
+    panel_custom = types.ModuleType("homeassistant.components.panel_custom")
+
+    async def async_register_panel(_hass, **kwargs):
+        calls["panels"].append(kwargs)
+
+    panel_custom.async_register_panel = async_register_panel
+    sys.modules["homeassistant.components.panel_custom"] = panel_custom
+
+    http = types.ModuleType("homeassistant.components.http")
+
+    class StaticPathConfig:
+        def __init__(self, url_path, path, cache_headers):
+            self.url_path = url_path
+            self.path = path
+            self.cache_headers = cache_headers
+
+    http.StaticPathConfig = StaticPathConfig
+    sys.modules["homeassistant.components.http"] = http
+
+    if "homeassistant.helpers" not in sys.modules:
+        sys.modules["homeassistant.helpers"] = types.ModuleType("homeassistant.helpers")
+    storage = types.ModuleType("homeassistant.helpers.storage")
+
+    class Store:
+        def __init__(self, hass, version, key):
+            self.hass = hass
+            self.version = version
+            self.key = key
+
+    storage.Store = Store
+    sys.modules["homeassistant.helpers.storage"] = storage
+
+    websocket = _load_websocket_module()
+    websocket.async_register_commands = lambda hass: calls["commands"].append(hass)
+
+    frontend = types.ModuleType("homeassistant.components.frontend")
+
+    async def async_remove_panel(_hass, panel_path):
+        calls["removed_panels"].append(panel_path)
+
+    frontend.async_remove_panel = async_remove_panel
+    sys.modules["homeassistant.components.frontend"] = frontend
+    return calls
+
+
+def _install_aiohttp_runner_stub(lines):
+    calls = {"posts": []}
+    aiohttp = types.ModuleType("aiohttp")
+
+    class ClientConnectionError(Exception):
+        pass
+
+    aiohttp.ClientConnectionError = ClientConnectionError
+    _FakeRunnerClientSession.lines = list(lines)
+    _FakeRunnerClientSession.calls = calls
+    aiohttp.ClientSession = _FakeRunnerClientSession
+    sys.modules["aiohttp"] = aiohttp
+    return aiohttp, calls
+
+
+def _install_aiohttp_json_stub(responses):
+    aiohttp = types.ModuleType("aiohttp")
+
+    class ClientError(Exception):
+        pass
+
+    aiohttp.ClientError = ClientError
+    response_list = list(responses)
+    _FakeJsonClientSession.responses = response_list
+    _FakeJsonClientSession.calls = []
+    aiohttp.ClientSession = _FakeJsonClientSession
+    sys.modules["aiohttp"] = aiohttp
+    return aiohttp, response_list
+
+
+class _FakeRunnerClientSession:
+    lines = []
+    calls = {"posts": []}
+
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_args):
+        return False
+
+    def post(self, url, json=None):
+        self.calls["posts"].append({"url": url, "json": json})
+        if url.endswith("/run"):
+            return _FakeRunnerResponse(self.lines)
+        return _FakeRunnerResponse([])
+
+
+class _FakeRunnerResponse:
+    def __init__(self, lines):
+        self.content = _FakeRunnerContent(lines)
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_args):
+        return False
+
+    def __await__(self):
+        async def _return_self():
+            return self
+
+        return _return_self().__await__()
+
+    def raise_for_status(self):
+        return None
+
+
+class _FakeRunnerContent:
+    def __init__(self, lines):
+        self.lines = list(lines)
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        if not self.lines:
+            raise StopAsyncIteration
+        return self.lines.pop(0)
+
+
+class _FakeJsonClientSession:
+    responses = []
+    calls = []
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_args):
+        return False
+
+    def get(self, url, timeout=None):
+        return self._request("GET", url, timeout)
+
+    def post(self, url, timeout=None):
+        return self._request("POST", url, timeout)
+
+    def _request(self, method, url, timeout):
+        self.calls.append({"method": method, "url": url, "timeout": timeout})
+        response = self.responses.pop(0)
+        error = response.get("raise")
+        if error is not None:
+            raise error
+        return _FakeJsonResponse(response)
+
+
+class _FakeJsonResponse:
+    def __init__(self, response):
+        self.response = response
+        self.status = int(response.get("status", 200))
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_args):
+        return False
+
+    async def json(self):
+        error = self.response.get("json_error")
+        if error is not None:
+            raise error
+        return self.response.get("payload")
+
+
 class _FakeConfig:
     def __init__(self, root):
         self.root = Path(root)
@@ -2400,12 +4629,39 @@ class _SequencedRunner:
             yield event
 
 
+class _FailingRunner:
+    def __init__(self, error):
+        self.error = error
+        self.calls = []
+
+    async def run(self, *args, **_kwargs):
+        self.calls.append(args)
+        raise self.error
+        yield
+
+
 async def _async_noop(*_args, **_kwargs):
     return None
 
 
 async def _async_empty_dict(*_args, **_kwargs):
     return {}
+
+
+async def _async_value(value):
+    return value
+
+
+class _FakeTask:
+    def __init__(self, done=False):
+        self._done = done
+        self.cancelled = False
+
+    def done(self):
+        return self._done
+
+    def cancel(self):
+        self.cancelled = True
 
 
 async def _async_bridge_health_ok():

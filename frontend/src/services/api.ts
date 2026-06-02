@@ -33,7 +33,11 @@ function sendPayload(request: string | ContextSendPayload, fallbackContext: HaCo
 }
 
 export class HaCodexApi {
-  constructor(private getHass: () => HomeAssistant | null) {}
+  private getHass: () => HomeAssistant | null;
+
+  constructor(getHass: () => HomeAssistant | null) {
+    this.getHass = getHass;
+  }
 
   async callWS<T>(payload: Record<string, unknown>): Promise<T> {
     const hass = this.getHass();
@@ -196,6 +200,13 @@ export class HaCodexApi {
     });
   }
 
+  deleteSession(sessionId: string) {
+    return this.callWS<{ deleted_session_id?: string }>({
+      type: "ha_codex/sessions/delete",
+      session_id: sessionId,
+    });
+  }
+
   respondApproval(sessionId: string, approvalId: string, approved: boolean) {
     return this.callWS<{ session: CodexSession }>({
       type: "ha_codex/approvals/respond",
@@ -223,6 +234,14 @@ export class HaCodexApi {
 
   gitSetupPull() {
     return this.callWS<GitSetupResult>({ type: "ha_codex/git/setup/pull" });
+  }
+
+  gitSetupChangeBranch(branch: string) {
+    return this.callWS<GitSetupResult>({ type: "ha_codex/git/setup/change_branch", branch });
+  }
+
+  gitSetupCheckoutCommit(commit: string) {
+    return this.callWS<GitSetupResult>({ type: "ha_codex/git/setup/checkout_commit", commit });
   }
 
   gitChanges() {

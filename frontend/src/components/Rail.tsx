@@ -5,13 +5,14 @@ import { Icon } from "./Icon";
 import { useChatStore } from "../stores/chatStore";
 import { useUiStore } from "../stores/uiStore";
 import { formatRelativeTime, formatRunTime, formatTimestampTitle } from "../utils/format";
-import { currentRestartApprovals, hasPendingQuestion, hasPendingRestart, hasPendingRunPlan, pendingApprovals, sessionListTime } from "../features/chat/chatUtils";
+import { currentRestartApprovals, filterSessionIdsBySearch, hasPendingQuestion, hasPendingRestart, hasPendingRunPlan, pendingApprovals, sessionListTime } from "../features/chat/chatUtils";
 import type { Approval, CodexSession, ValidationResult } from "../types/ha";
 
 interface RailProps {
   onNew: () => void;
   onSelect: (id: string) => void;
   onArchive: (id: string, archived: boolean) => void;
+  onDeleteArchived: (id: string) => void;
   onToggleArchived: () => void;
   onValidate: () => void;
   onDebug: () => void;
@@ -61,13 +62,19 @@ export function Rail(props: RailProps) {
   const bridgeUnavailable = (status.runtime as { bridge_available?: boolean } | undefined)?.bridge_available === false;
   const tone = validationTone(validation, validationRunning);
   const archiveToggleLabel = showArchived ? "Current chats" : "Archived chats";
+  const [archiveSearch, setArchiveSearch] = useState("");
   const [switchAnimation, setSwitchAnimation] = useState({ active: false, ids: [] as string[], phase: 0 });
   const [restartMenuOpen, setRestartMenuOpen] = useState(false);
   const previousOrderRef = useRef<{ ids: string[]; mode: "archived" | "current" } | null>(null);
   const restartActionRef = useRef<HTMLDivElement | null>(null);
   const switchTimeoutRef = useRef<number | null>(null);
   const mode = showArchived ? "archived" : "current";
+  const filteredVisibleIds = useMemo(
+    () => (showArchived ? filterSessionIdsBySearch(visibleIds, chatsById, archiveSearch) : visibleIds),
+    [archiveSearch, chatsById, showArchived, visibleIds],
+  );
   const switchingIds = useMemo(() => new Set(switchAnimation.ids), [switchAnimation.ids]);
+  const archiveSearchActive = showArchived && Boolean(archiveSearch.trim());
 
   useEffect(() => {
     const previous = previousOrderRef.current;
@@ -91,6 +98,10 @@ export function Rail(props: RailProps) {
   useEffect(() => () => {
     if (switchTimeoutRef.current) window.clearTimeout(switchTimeoutRef.current);
   }, []);
+
+  useEffect(() => {
+    if (!showArchived && archiveSearch) setArchiveSearch("");
+  }, [archiveSearch, showArchived]);
 
   useEffect(() => {
     if (!restartApprovals.length) setRestartMenuOpen(false);
@@ -119,11 +130,23 @@ export function Rail(props: RailProps) {
         <button onClick={props.onNew} title="New chat">+</button>
       </div>
       <div className="sessions" data-sessions-mode={showArchived ? "archived" : "current"}>
-        {!visibleIds.length ? <p className="muted pad">{showArchived ? "No archived chats." : "No chats yet."}</p> : null}
-        {visibleIds.length ? (
+        {showArchived ? (
+          <label className="archive-search">
+            <Icon icon="mdi:magnify" />
+            <input
+              type="search"
+              value={archiveSearch}
+              onChange={(event) => setArchiveSearch(event.currentTarget.value)}
+              placeholder="Search archived chats"
+              aria-label="Search archived chats"
+            />
+          </label>
+        ) : null}
+        {!filteredVisibleIds.length ? <p className="muted pad">{showArchived ? (archiveSearchActive && visibleIds.length ? "No archived chats match your search." : "No archived chats.") : "No chats yet."}</p> : null}
+        {filteredVisibleIds.length ? (
           <Virtuoso
             className="sessions-virtual-list"
-            data={visibleIds}
+            data={filteredVisibleIds}
             computeItemKey={(_, id) => id}
             itemContent={(_, id) => (
               <SessionRow
@@ -133,6 +156,7 @@ export function Rail(props: RailProps) {
                 switchPhase={switchAnimation.phase}
                 onSelect={props.onSelect}
                 onArchive={props.onArchive}
+                onDeleteArchived={props.onDeleteArchived}
               />
             )}
           />
@@ -248,7 +272,7 @@ const RestartAction = memo(function RestartAction({
   );
 });
 
-const SessionRow = memo(function SessionRow({ id, active, switching, switchPhase, onSelect, onArchive }: { id: string; active: boolean; switching: boolean; switchPhase: number; onSelect: (id: string) => void; onArchive: (id: string, archived: boolean) => void }) {
+const SessionRow = memo(function SessionRow({ id, active, switching, switchPhase, onSelect, onArchive, onDeleteArchived }: { id: string; active: boolean; switching: boolean; switchPhase: number; onSelect: (id: string) => void; onArchive: (id: string, archived: boolean) => void; onDeleteArchived: (id: string) => void }) {
   const session = useChatStore((state) => state.chatsById[id]);
   if (!session) return null;
   const archived = Boolean(session.archived);
@@ -263,9 +287,14 @@ const SessionRow = memo(function SessionRow({ id, active, switching, switchPhase
           <span className="meta">{formatRunTime(sessionListTime(session))}</span>
         </span>
       </button>
-      <button className="icon-button session-archive" onClick={() => onArchive(id, !archived)} title={archived ? "Restore chat" : "Archive chat"} aria-label={archived ? "Restore chat" : "Archive chat"}>
+      <button className="icon-button session-archive" data-action={archived ? "unarchive" : "archive"} onClick={() => onArchive(id, !archived)} title={archived ? "Restore chat" : "Archive chat"} aria-label={archived ? "Restore chat" : "Archive chat"}>
         <Icon icon={archived ? "mdi:archive-arrow-up-outline" : "mdi:archive-arrow-down-outline"} />
       </button>
+      {archived ? (
+        <button className="icon-button session-delete" onClick={() => onDeleteArchived(id)} title="Delete archived chat" aria-label="Delete archived chat">
+          <Icon icon="mdi:trash-can-outline" />
+        </button>
+      ) : null}
     </div>
   );
 });

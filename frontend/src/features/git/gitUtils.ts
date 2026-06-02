@@ -81,6 +81,33 @@ export function gitSetupMissingItems(status: GitSetupStatus | null | undefined):
   return status.missing?.length ? status.missing : [];
 }
 
+export function isGitSetupStatusLoadError(status: GitSetupStatus | null | undefined): boolean {
+  return Boolean(status?.missing?.includes("setup status"));
+}
+
+export function gitSetupSummary(status: GitSetupStatus | null | undefined, loading = false): { tone: "checking" | "success" | "warning"; title: string; detail: string } {
+  if (!status || loading) {
+    return {
+      tone: "checking",
+      title: "Checking Git setup...",
+      detail: "Loading setup status...",
+    };
+  }
+  if (isGitSetupReady(status)) {
+    return {
+      tone: "success",
+      title: "Git integration ready",
+      detail: "Review, commit, and push controls are enabled.",
+    };
+  }
+  const missing = gitSetupMissingItems(status);
+  return {
+    tone: "warning",
+    title: "Git setup incomplete",
+    detail: `Missing: ${missing.join(", ") || "setup status"}`,
+  };
+}
+
 export function parsePatchLines(patch: string) {
   return String(patch || "")
     .split("\n")

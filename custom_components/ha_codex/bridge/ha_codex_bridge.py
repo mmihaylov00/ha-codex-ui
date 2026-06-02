@@ -190,8 +190,7 @@ class BridgeHandler(BaseHTTPRequestHandler):
             stderr_thread.join(timeout=2)
             stderr = "".join(stderr_lines)
             bridge_log(
-                f"run finished pid={process.pid} returncode={returncode} "
-                f"stderr={stderr.strip()!r}"
+                f"run finished pid={process.pid} returncode={returncode} stderr={stderr.strip()!r}"
             )
             if returncode != 0 and client_connected:
                 self.write_jsonl(
@@ -355,7 +354,7 @@ class BridgeHandler(BaseHTTPRequestHandler):
         env = os.environ.copy()
         env["CODEX_HOME"] = str(CODEX_HOME)
         system_path = (
-            f"{CONFIG_DIR}/bin:" "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+            f"{CONFIG_DIR}/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
         )
         current_path = env.get("PATH", "")
         env["PATH"] = f"{system_path}:{current_path}" if current_path else system_path

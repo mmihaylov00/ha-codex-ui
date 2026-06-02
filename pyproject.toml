@@ -13,3 +13,10 @@ known-first-party = ["custom_components"]
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"
+
+[tool.coverage.run]
+source = ["custom_components.ha_codex"]
+
+[tool.coverage.report]
+fail_under = 90
+show_missing = true

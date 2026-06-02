@@ -271,8 +271,7 @@ class RestartWatchMixin:
             ChatMessage(
                 role="event",
                 content=(
-                    "Home Assistant Core restart deferred because another user "
-                    "message was queued."
+                    "Home Assistant Core restart deferred because another user message was queued."
                 ),
                 metadata={"kind": "restart_deferred"},
             ),

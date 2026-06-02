@@ -71,6 +71,7 @@ class GitOperationsMixin:
         upstream = ""
         work_tree = ""
         repo_error = ""
+        history: list[dict[str, Any]] = []
 
         if git_version["ok"] and self._git_repository_marker_exists():
             repo_result = await self._run_command(
@@ -111,6 +112,15 @@ class GitOperationsMixin:
                 )
                 if upstream_result["ok"]:
                     upstream = upstream_result["stdout"].strip()
+                history_result = await self._run_command(
+                    self._git_command(
+                        ["log", "--max-count=12", "--pretty=format:%H%x1f%h%x1f%ct%x1f%s"]
+                    ),
+                    cwd=None,
+                    timeout=20,
+                )
+                if history_result["ok"]:
+                    history = self._parse_git_history(history_result["stdout"])
         elif git_version["ok"]:
             repo_error = "No Git repository is initialized under the Home Assistant config path."
 
@@ -151,6 +161,7 @@ class GitOperationsMixin:
             "ssh_key_path": str(private_key),
             "ssh_public_key_path": str(public_key),
             "public_key": public_key_text,
+            "history": history,
             "setup_complete": setup_complete,
             "missing": missing,
         }
@@ -358,6 +369,100 @@ class GitOperationsMixin:
         return {
             "ok": pull_result["ok"],
             "step": "pull",
+            "results": results,
+            "status": await self.async_git_setup_status(),
+        }
+
+    async def async_git_setup_change_branch(self, branch: str) -> dict[str, Any]:
+        """Checkout a Git branch in the workspace."""
+        safe_branch = self._safe_git_branch_name(branch)
+        status = await self.async_git_setup_status()
+        if not status["repository"]:
+            return {
+                "ok": False,
+                "step": "setup",
+                "stderr": "Git repository is required before changing branches.",
+                "status": status,
+            }
+        if status["remote_uses_ssh"] and not status["ssh_key_exists"]:
+            return {
+                "ok": False,
+                "step": "ssh_key",
+                "stderr": "Generate an SSH key before fetching branches from an SSH remote.",
+                "status": status,
+            }
+
+        results: list[dict[str, Any]] = []
+        if status["remote_configured"]:
+            fetch_result = await self._run_command(
+                self._git_command(["fetch", "origin", "--prune"]),
+                cwd=None,
+                timeout=240,
+            )
+            results.append(fetch_result)
+            if not fetch_result["ok"]:
+                return {
+                    "ok": False,
+                    "step": "fetch",
+                    "results": results,
+                    "status": await self.async_git_setup_status(),
+                }
+            remote_result = await self._run_command(
+                self._git_command(["rev-parse", "--verify", f"origin/{safe_branch}"]),
+                cwd=None,
+                timeout=10,
+            )
+            results.append(remote_result)
+
+        checkout_result = await self._run_command(
+            self._git_command(["checkout", safe_branch]),
+            cwd=None,
+            timeout=120,
+        )
+        results.append(checkout_result)
+        return {
+            "ok": checkout_result["ok"],
+            "step": "checkout",
+            "results": results,
+            "status": await self.async_git_setup_status(),
+        }
+
+    async def async_git_setup_checkout_commit(self, commit: str) -> dict[str, Any]:
+        """Checkout a previous Git commit in the workspace."""
+        safe_commit = self._safe_git_commit_ref(commit)
+        status = await self.async_git_setup_status()
+        if not status["repository"]:
+            return {
+                "ok": False,
+                "step": "setup",
+                "stderr": "Git repository is required before checking out a commit.",
+                "status": status,
+            }
+
+        results: list[dict[str, Any]] = []
+        verify_result = await self._run_command(
+            self._git_command(["rev-parse", "--verify", f"{safe_commit}^{{commit}}"]),
+            cwd=None,
+            timeout=10,
+        )
+        results.append(verify_result)
+        if not verify_result["ok"]:
+            return {
+                "ok": False,
+                "step": "verify",
+                "results": results,
+                "status": await self.async_git_setup_status(),
+            }
+
+        checkout_result = await self._run_command(
+            self._git_command(["checkout", safe_commit]),
+            cwd=None,
+            timeout=120,
+        )
+        results.append(checkout_result)
+        return {
+            "ok": checkout_result["ok"],
+            "step": "checkout",
             "results": results,
             "status": await self.async_git_setup_status(),
         }
@@ -1058,6 +1163,28 @@ class GitOperationsMixin:
                     return branch.removeprefix("origin/")
         return ""
 
+    def _parse_git_history(self, output: str) -> list[dict[str, Any]]:
+        """Parse compact git log output into frontend-friendly history records."""
+        history: list[dict[str, Any]] = []
+        for line in output.splitlines():
+            parts = line.split("\x1f", 3)
+            if len(parts) != 4:
+                continue
+            full_hash, short_hash, timestamp, subject = parts
+            try:
+                unix_time = int(timestamp)
+            except ValueError:
+                unix_time = 0
+            history.append(
+                {
+                    "hash": full_hash,
+                    "short_hash": short_hash,
+                    "timestamp": unix_time,
+                    "subject": subject,
+                }
+            )
+        return history
+
     def _git_setup_private_key_path(self) -> Path:
         return Path(self.hass.config.path(".ssh", _GIT_SETUP_KEY_NAME))
 
@@ -1088,6 +1215,47 @@ class GitOperationsMixin:
         value = str(remote_url or "").strip()
         if not value or "\0" in value or "\n" in value or "\r" in value or value.startswith("-"):
             raise ValueError("Git remote URL is invalid")
+        return value
+
+    def _safe_git_branch_name(self, branch: str) -> str:
+        value = str(branch or "").strip()
+        invalid_parts = (
+            "\0",
+            "\n",
+            "\r",
+            " ",
+            "~",
+            "^",
+            ":",
+            "?",
+            "*",
+            "[",
+            "\\",
+            "..",
+            "@{",
+        )
+        if (
+            not value
+            or value == "@"
+            or value.startswith(("-", "/", "."))
+            or value.endswith(("/", ".", ".lock"))
+            or any(part in value for part in invalid_parts)
+            or any(
+                not component or component.startswith(".") or component.endswith(".lock")
+                for component in value.split("/")
+            )
+        ):
+            raise ValueError("Git branch name is invalid")
+        return value
+
+    def _safe_git_commit_ref(self, commit: str) -> str:
+        value = str(commit or "").strip()
+        if (
+            not value
+            or len(value) > 40
+            or not all(character in "0123456789abcdefABCDEF" for character in value)
+        ):
+            raise ValueError("Git commit is invalid")
         return value
 
     def _git_ssh_command(self) -> str | None:

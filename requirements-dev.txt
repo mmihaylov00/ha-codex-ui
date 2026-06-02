@@ -1,2 +1,2 @@
-ruff==0.8.6
-
+coverage[toml]==7.10.7
+ruff==0.15.15

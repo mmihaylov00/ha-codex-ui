@@ -238,7 +238,7 @@ export function sortedSessions(sessions: CodexSession[], archived = false): Code
       if (archivedTimeDelta !== 0) return archivedTimeDelta;
       return leftMetrics.title.localeCompare(rightMetrics.title);
     }
-    const emptyDelta = Number(rightMetrics.empty) - Number(leftMetrics.empty);
+    const emptyDelta = Number(leftMetrics.empty) - Number(rightMetrics.empty);
     if (emptyDelta !== 0) return emptyDelta;
     const statusDelta = leftMetrics.rank - rightMetrics.rank;
     if (statusDelta !== 0) return statusDelta;
@@ -246,4 +246,20 @@ export function sortedSessions(sessions: CodexSession[], archived = false): Code
     if (timeDelta !== 0) return timeDelta;
     return leftMetrics.title.localeCompare(rightMetrics.title);
   });
+}
+
+export function filterSessionIdsBySearch(ids: string[], chatsById: Record<string, CodexSession>, query: string): string[] {
+  const normalizedQuery = query.trim().toLowerCase();
+  if (!normalizedQuery) return ids;
+  return ids.filter((id) => {
+    const session = chatsById[id];
+    if (!session) return false;
+    return [session.title, session.id, session.codex_session_id]
+      .filter((value) => value !== null && value !== undefined)
+      .some((value) => String(value).toLowerCase().includes(normalizedQuery));
+  });
+}
+
+export function cleanupArchivedSessionIds(ids: string[], chatsById: Record<string, CodexSession | undefined>): string[] {
+  return ids.filter((id) => Boolean(chatsById[id]?.archived));
 }

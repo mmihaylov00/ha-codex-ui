@@ -1,6 +1,7 @@
 import React from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { AppShell } from "./App";
+import { haCodexThemeClass } from "./features/theme/themeUtils";
 import type { HomeAssistant, PanelInfo } from "./types/ha";
 import panelCss from "./styles/panel.css?inline";
 
@@ -17,7 +18,7 @@ class HaCodexPanel extends HTMLElement {
     style.textContent = panelCss;
     shadow.appendChild(style);
     this.mount = document.createElement("div");
-    this.mount.className = "ha-codex-root";
+    this.updateThemeClass();
     shadow.appendChild(this.mount);
   }
 
@@ -32,6 +33,7 @@ class HaCodexPanel extends HTMLElement {
 
   set hass(value: HomeAssistant | null) {
     this._hass = value;
+    this.updateThemeClass();
     this.renderReact();
   }
 
@@ -52,6 +54,10 @@ class HaCodexPanel extends HTMLElement {
     if (!this.isConnected) return;
     if (!this.root) this.root = createRoot(this.mount);
     this.root.render(<React.StrictMode><AppShell hass={this._hass} panel={this._panel} /></React.StrictMode>);
+  }
+
+  private updateThemeClass() {
+    this.mount.className = `ha-codex-root ${haCodexThemeClass(this._hass)}`;
   }
 }
 

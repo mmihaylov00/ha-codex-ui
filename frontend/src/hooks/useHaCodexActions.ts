@@ -3,8 +3,8 @@ import type { HaCodexApi } from "../services/api";
 import { useChatStore } from "../stores/chatStore";
 import { useUiStore } from "../stores/uiStore";
 import { errorSummary, stripAnsi } from "../utils/format";
-import { gitStatusLabel, gitFileKey, isGitSetupReady, reviewableGitFileCount, reviewableGitFiles, selectedGitFiles } from "../features/git/gitUtils";
-import { hasPendingQuestion, hasPendingRestart, hasPendingRunPlan, isSessionBusy, pendingApprovals } from "../features/chat/chatUtils";
+import { gitStatusLabel, gitFileKey, isGitSetupReady, isGitSetupStatusLoadError, reviewableGitFileCount, reviewableGitFiles, selectedGitFiles } from "../features/git/gitUtils";
+import { cleanupArchivedSessionIds, hasPendingQuestion, hasPendingRestart, hasPendingRunPlan, isSessionBusy, pendingApprovals } from "../features/chat/chatUtils";
 import { buildContextSendPayload, contextAttachmentsFromItems, shouldClearContextAfterSend, type ContextSendPayload, type HaContextItem } from "../features/context/contextUtils";
 import { runPlanRevisePrompt } from "../features/runPlan/runPlanUtils";
 import { normalizeHaCodexSettings, normalizeRunSettings } from "../features/settings/runtimeSettingsUtils";
@@ -188,6 +188,21 @@ export function useHaCodexActions(api: HaCodexApi) {
       }
     };
 
+    const retryGitSetupStatusAfterStartup = (attempt = 1) => {
+      window.setTimeout(() => {
+        void (async () => {
+          if (!isGitSetupStatusLoadError(ui().gitSetupStatus)) return;
+          const status = await loadGitSetupStatus(false);
+          await loadGitCount();
+          if (isGitSetupStatusLoadError(status) && attempt < 5) {
+            retryGitSetupStatusAfterStartup(attempt + 1);
+          }
+        })().catch(() => {
+          if (attempt < 5) retryGitSetupStatusAfterStartup(attempt + 1);
+        });
+      }, attempt * 1000);
+    };
+
     const loadGitChanges = async (toast = true) => {
       if (ui().gitLoading) return;
       if (!isGitSetupReady(ui().gitSetupStatus)) {
@@ -321,6 +336,50 @@ export function useHaCodexActions(api: HaCodexApi) {
       }
     };
 
+    const deleteArchivedSession = async (sessionId: string) => {
+      const original = chat().chatsById[sessionId];
+      if (!original || !original.archived) return;
+      const title = String(original.title || "").trim();
+      const message = title
+        ? `Delete "${title}" from the archive? This cannot be undone.`
+        : "Delete this archived chat? This cannot be undone.";
+      if (!window.confirm(message)) return;
+      chat().deleteSession(sessionId);
+      try {
+        await api.deleteSession(sessionId);
+        ui().showToast("Archived chat deleted", "success");
+      } catch (error) {
+        chat().upsertSession(original);
+        ui().showToast(errorSummary(error), "error");
+      }
+    };
+
+    const cleanupArchivedSessions = async () => {
+      const state = chat();
+      const ids = cleanupArchivedSessionIds(state.archivedChatIds, state.chatsById);
+      if (!ids.length) {
+        ui().showToast("No archived chats to clean up", "info");
+        return;
+      }
+      if (!window.confirm(`Delete all ${ids.length} archived chat${ids.length === 1 ? "" : "s"}? This cannot be undone.`)) return;
+      const originals = ids.map((id) => state.chatsById[id]).filter(Boolean) as CodexSession[];
+      ui().setArchiveCleanupRunning(true);
+      ids.forEach((id) => chat().deleteSession(id));
+      try {
+        const results = await Promise.allSettled(ids.map((id) => api.deleteSession(id)));
+        const failedIds = ids.filter((_, index) => results[index].status === "rejected");
+        if (failedIds.length) {
+          originals.filter((session) => failedIds.includes(session.id)).forEach((session) => chat().upsertSession(session));
+          throw new Error(`${failedIds.length} archived chat${failedIds.length === 1 ? "" : "s"} could not be deleted`);
+        }
+        ui().showToast(`Deleted ${ids.length} archived chat${ids.length === 1 ? "" : "s"}`, "success");
+      } catch (error) {
+        ui().showToast(errorSummary(error), "error");
+      } finally {
+        ui().setArchiveCleanupRunning(false);
+      }
+    };
+
     const startNextQueuedMessage = async (sessionId: string) => {
       const queue = chat().queuesByChatId[sessionId] || [];
       const item = queue[0];
@@ -346,10 +405,26 @@ export function useHaCodexActions(api: HaCodexApi) {
       }
     };
 
+    const promptRestartHomeAssistant = async (message = "Restart Home Assistant Core now?") => {
+      if (!window.confirm(message)) return;
+      ui().setCoreActionRunning(true);
+      try {
+        const result = await api.coreRestart();
+        if (!result?.ok) throw new Error(result?.error || "Home Assistant restart failed");
+        ui().showToast("Home Assistant restart requested", "success");
+      } finally {
+        ui().setCoreActionRunning(false);
+      }
+    };
+
     return {
       loadInitial: async () => {
-        await Promise.all([loadSessions(), loadStatus(), loadSettings(), loadAccountStatus(), loadGitSetupStatus(false)]);
+        const results = await Promise.all([loadSessions(), loadStatus(), loadSettings(), loadAccountStatus(), loadGitSetupStatus(false)]);
         await loadGitCount();
+        const gitSetupStatus = results[4];
+        if (isGitSetupStatusLoadError(gitSetupStatus)) {
+          retryGitSetupStatusAfterStartup();
+        }
       },
       loadSessions,
       loadStatus,
@@ -375,6 +450,8 @@ export function useHaCodexActions(api: HaCodexApi) {
         ui().showToast("Chat renamed", "success");
       },
       archiveSession,
+      deleteArchivedSession,
+      cleanupArchivedSessions,
       cancelSession: async (sessionId: string) => {
         const result = await api.cancel(sessionId);
         chat().upsertSession(result.session);
@@ -569,6 +646,47 @@ export function useHaCodexActions(api: HaCodexApi) {
           if (!result.ok) throw new Error(gitSetupResultMessage(result, "Git pull failed"));
           ui().showToast("Git pull completed", "success");
           await loadGitCount();
+          await promptRestartHomeAssistant("Git pull completed. Restart Home Assistant Core now?");
+        } finally {
+          ui().setGitSetupActionRunning(false);
+        }
+      },
+      changeGitSetupBranch: async (branch: string) => {
+        const value = branch.trim();
+        if (!value) {
+          ui().showToast("Branch name is required", "error");
+          return;
+        }
+        ui().setGitSetupActionRunning(true);
+        ui().setGitSetupResult(null);
+        try {
+          const result = await api.gitSetupChangeBranch(value);
+          ui().setGitSetupResult(result);
+          if (result.status) ui().setGitSetupStatus(result.status);
+          if (!result.ok) throw new Error(gitSetupResultMessage(result, "Branch change failed"));
+          ui().showToast("Git branch changed", "success");
+          await loadGitCount();
+          await promptRestartHomeAssistant("Git branch changed. Restart Home Assistant Core now?");
+        } finally {
+          ui().setGitSetupActionRunning(false);
+        }
+      },
+      checkoutGitSetupCommit: async (commit: string) => {
+        const value = commit.trim();
+        if (!value) {
+          ui().showToast("Commit is required", "error");
+          return;
+        }
+        ui().setGitSetupActionRunning(true);
+        ui().setGitSetupResult(null);
+        try {
+          const result = await api.gitSetupCheckoutCommit(value);
+          ui().setGitSetupResult(result);
+          if (result.status) ui().setGitSetupStatus(result.status);
+          if (!result.ok) throw new Error(gitSetupResultMessage(result, "Commit checkout failed"));
+          ui().showToast("Git commit checked out", "success");
+          await loadGitCount();
+          await promptRestartHomeAssistant("Git commit checked out. Restart Home Assistant Core now?");
         } finally {
           ui().setGitSetupActionRunning(false);
         }
@@ -682,15 +800,7 @@ export function useHaCodexActions(api: HaCodexApi) {
         }
       },
       restartHomeAssistant: async () => {
-        if (!window.confirm("Restart Home Assistant Core now?")) return;
-        ui().setCoreActionRunning(true);
-        try {
-          const result = await api.coreRestart();
-          if (!result?.ok) throw new Error(result?.error || "Home Assistant restart failed");
-          ui().showToast("Home Assistant restart requested", "success");
-        } finally {
-          ui().setCoreActionRunning(false);
-        }
+        await promptRestartHomeAssistant();
       },
       startDeviceLogin: async () => {
         ui().setAccountActionRunning(true);

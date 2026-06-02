@@ -11,6 +11,7 @@ interface UiStore {
   bridgeLogLoading: boolean;
   bridgeActionRunning: boolean;
   coreActionRunning: boolean;
+  archiveCleanupRunning: boolean;
   account: CodexAccountStatus | null;
   accountLoading: boolean;
   accountActionRunning: boolean;
@@ -49,6 +50,7 @@ interface UiStore {
   setBridgeLogLoading: (loading: boolean) => void;
   setBridgeActionRunning: (running: boolean) => void;
   setCoreActionRunning: (running: boolean) => void;
+  setArchiveCleanupRunning: (running: boolean) => void;
   setAccount: (account: CodexAccountStatus | null) => void;
   setAccountLoading: (loading: boolean) => void;
   setAccountActionRunning: (running: boolean) => void;
@@ -89,6 +91,7 @@ export const useUiStore = create<UiStore>((set, get) => ({
   bridgeLogLoading: false,
   bridgeActionRunning: false,
   coreActionRunning: false,
+  archiveCleanupRunning: false,
   account: null,
   accountLoading: false,
   accountActionRunning: false,
@@ -127,6 +130,7 @@ export const useUiStore = create<UiStore>((set, get) => ({
   setBridgeLogLoading: (bridgeLogLoading) => set({ bridgeLogLoading }),
   setBridgeActionRunning: (bridgeActionRunning) => set({ bridgeActionRunning }),
   setCoreActionRunning: (coreActionRunning) => set({ coreActionRunning }),
+  setArchiveCleanupRunning: (archiveCleanupRunning) => set({ archiveCleanupRunning }),
   setAccount: (account) => set({ account }),
   setAccountLoading: (accountLoading) => set({ accountLoading }),
   setAccountActionRunning: (accountActionRunning) => set({ accountActionRunning }),

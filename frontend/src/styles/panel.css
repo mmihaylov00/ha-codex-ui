@@ -18,6 +18,7 @@
         --tw-danger: #ef4444;
         --tw-danger-soft: #3b1118;
         --tw-success: #22c55e;
+        --tw-surface: #0b1120;
         --tw-action-soft: #123044;
         --tw-shadow: 0 18px 50px rgba(0, 0, 0, 0.38);
         --tw-ring: 0 0 0 3px rgba(56, 189, 248, 0.22);
@@ -30,6 +31,136 @@
         color: var(--tw-text);
         background: var(--tw-bg);
         font-family: var(--ha-font-family-body, system-ui, sans-serif);
+        color-scheme: dark;
+      }
+      .ha-codex-root.theme-light {
+        --tw-bg: var(--primary-background-color, #f8fafc);
+        --tw-panel: var(--card-background-color, #ffffff);
+        --tw-panel-soft: var(--secondary-background-color, #f1f5f9);
+        --tw-panel-strong: #e2e8f0;
+        --tw-border: var(--divider-color, #d5dde8);
+        --tw-muted: var(--secondary-text-color, #64748b);
+        --tw-text: var(--primary-text-color, #334155);
+        --tw-text-strong: var(--primary-text-color, #0f172a);
+        --tw-primary: var(--primary-color, #0284c7);
+        --tw-primary-soft: #e0f2fe;
+        --tw-accent: var(--accent-color, #0f766e);
+        --tw-accent-soft: #ccfbf1;
+        --tw-warning: #b45309;
+        --tw-danger: #dc2626;
+        --tw-danger-soft: #fee2e2;
+        --tw-success: #16a34a;
+        --tw-surface: #ffffff;
+        --tw-action-soft: #e0f2fe;
+        --tw-shadow: 0 18px 50px rgba(15, 23, 42, 0.14);
+        --tw-ring: 0 0 0 3px rgba(2, 132, 199, 0.2);
+        --tw-button-shadow: 0 10px 24px rgba(15, 23, 42, 0.14);
+        --tw-button-primary-shadow: 0 12px 28px rgba(2, 132, 199, 0.18);
+        --tw-button-danger-shadow: 0 12px 28px rgba(220, 38, 38, 0.16);
+        color-scheme: light;
+      }
+      .ha-codex-root.theme-light .shell {
+        background:
+          radial-gradient(circle at 24% 0%, rgba(14, 165, 233, 0.12), transparent 30%),
+          linear-gradient(180deg, #ffffff 0%, var(--tw-bg) 100%);
+      }
+      .ha-codex-root.theme-light .rail,
+      .ha-codex-root.theme-light .drawer,
+      .ha-codex-root.theme-light .chat-header,
+      .ha-codex-root.theme-light .composer,
+      .ha-codex-root.theme-light .archived-note,
+      .ha-codex-root.theme-light .commit-box {
+        background: rgba(255, 255, 255, 0.94);
+      }
+      .ha-codex-root.theme-light .run-controls select,
+      .ha-codex-root.theme-light .run-controls-extra select,
+      .ha-codex-root.theme-light .run-select-button,
+      .ha-codex-root.theme-light .setting-field select,
+      .ha-codex-root.theme-light .setting-field input,
+      .ha-codex-root.theme-light .settings-model-row input,
+      .ha-codex-root.theme-light .archive-search input,
+      .ha-codex-root.theme-light .plan-mode-options,
+      .ha-codex-root.theme-light .builder-field input,
+      .ha-codex-root.theme-light .builder-field select,
+      .ha-codex-root.theme-light .builder-field textarea,
+      .ha-codex-root.theme-light .context-toolbar input,
+      .ha-codex-root.theme-light textarea,
+      .ha-codex-root.theme-light input[name='question-custom'] {
+        background: rgba(255, 255, 255, 0.9);
+      }
+      .ha-codex-root.theme-light .message-style-command,
+      .ha-codex-root.theme-light .message-builder-chip,
+      .ha-codex-root.theme-light .message-context-chip,
+      .ha-codex-root.theme-light .validation-card,
+      .ha-codex-root.theme-light .account-status-card,
+      .ha-codex-root.theme-light .account-detail,
+      .ha-codex-root.theme-light .device-login-panel,
+      .ha-codex-root.theme-light .git-setup-summary,
+      .ha-codex-root.theme-light .git-setup-result,
+      .ha-codex-root.theme-light .builder-fields-simple .builder-field input,
+      .ha-codex-root.theme-light .builder-fields-simple .builder-field textarea,
+      .ha-codex-root.theme-light .builder-context-chip,
+      .ha-codex-root.theme-light .builder-context-empty,
+      .ha-codex-root.theme-light .context-row,
+      .ha-codex-root.theme-light .runtime-card,
+      .ha-codex-root.theme-light .message-file-changes .diff-file {
+        background: rgba(255, 255, 255, 0.72);
+      }
+      .ha-codex-root.theme-light .validation-output pre,
+      .ha-codex-root.theme-light .markdown-body pre,
+      .ha-codex-root.theme-light .device-login-code,
+      .ha-codex-root.theme-light .device-login-output,
+      .ha-codex-root.theme-light .git-public-key,
+      .ha-codex-root.theme-light .git-setup-result pre,
+      .ha-codex-root.theme-light .diff-lines,
+      .ha-codex-root.theme-light .git-operation-result pre,
+      .ha-codex-root.theme-light .result,
+      .ha-codex-root.theme-light .raw-event-details pre,
+      .ha-codex-root.theme-light .entity-combobox-menu {
+        background: #f8fafc;
+      }
+      .ha-codex-root.theme-light .message-style-command,
+      .ha-codex-root.theme-light .command-text {
+        color: var(--tw-text);
+      }
+      .ha-codex-root.theme-light .line-stats .added,
+      .ha-codex-root.theme-light .diff-line.added {
+        background: #dcfce7;
+      }
+      .ha-codex-root.theme-light .line-stats .added,
+      .ha-codex-root.theme-light .diff-line.added .marker,
+      .ha-codex-root.theme-light .diff-line.added code {
+        color: #166534;
+      }
+      .ha-codex-root.theme-light .line-stats .deleted,
+      .ha-codex-root.theme-light .diff-line.deleted {
+        background: #fee2e2;
+      }
+      .ha-codex-root.theme-light .line-stats .deleted,
+      .ha-codex-root.theme-light .diff-line.deleted .marker,
+      .ha-codex-root.theme-light .diff-line.deleted code,
+      .ha-codex-root.theme-light .builder-errors,
+      .ha-codex-root.theme-light .context-errors,
+      .ha-codex-root.theme-light .diff-error,
+      .ha-codex-root.theme-light .discard-confirm span,
+      .ha-codex-root.theme-light .loading-state.error {
+        color: #991b1b;
+      }
+      .ha-codex-root.theme-light .diff-line.hunk {
+        background: #e0f2fe;
+      }
+      .ha-codex-root.theme-light .diff-line.hunk .marker,
+      .ha-codex-root.theme-light .diff-line.hunk code {
+        color: #075985;
+      }
+      .ha-codex-root.theme-light .device-login-code.copied,
+      .ha-codex-root.theme-light .device-login-code.copied .device-login-copy,
+      .ha-codex-root.theme-light .modal-tabs .bridge-action-start {
+        color: #166534;
+      }
+      .ha-codex-root.theme-light .context-button b,
+      .ha-codex-root.theme-light .context-row.selected .context-checkbox {
+        color: #ffffff;
       }
       * {
         box-sizing: border-box;
@@ -114,14 +245,51 @@
       }
       .sessions {
         align-content: start;
-        display: block;
+        display: flex;
+        flex-direction: column;
         gap: 8px;
-        grid-auto-rows: 66px;
-        overflow: auto;
+        min-height: 0;
+        overflow: hidden;
         padding: 0 12px 18px;
       }
       .sessions-virtual-list {
+        flex: 1 1 auto;
         height: 100%;
+        min-height: 0;
+      }
+      .archive-search {
+        align-items: center;
+        background: rgba(15, 23, 42, 0.58);
+        border: 1px solid var(--tw-border);
+        border-radius: 8px;
+        color: var(--tw-muted);
+        display: grid;
+        flex: none;
+        gap: 8px;
+        grid-template-columns: 20px minmax(0, 1fr);
+        min-height: 38px;
+        padding: 0 10px;
+      }
+      .archive-search ha-icon {
+        --mdc-icon-size: 18px;
+      }
+      .archive-search:focus-within {
+        border-color: rgba(56, 189, 248, 0.62);
+        box-shadow: var(--tw-ring);
+        color: var(--tw-primary);
+      }
+      .archive-search input {
+        background: transparent;
+        border: 0;
+        color: var(--tw-text);
+        font: inherit;
+        min-width: 0;
+        outline: 0;
+        padding: 8px 0;
+        width: 100%;
+      }
+      .archive-search input::placeholder {
+        color: var(--tw-muted);
       }
       .rail-footer {
         background: inherit;
@@ -383,6 +551,9 @@
       .session-row.active {
         box-shadow: inset 3px 0 0 var(--tw-primary);
       }
+      .session-row.archived {
+        grid-template-columns: minmax(0, 1fr) 34px 34px;
+      }
       .session-row.switching-1 {
         animation: session-switch-1 320ms cubic-bezier(0.2, 0, 0, 1);
       }
@@ -426,7 +597,10 @@
       .session-archive {
         opacity: 0.68;
       }
-      .session-archive:hover {
+      .session-delete {
+        opacity: 0.68;
+      }
+      .session-archive:hover, .session-delete:hover {
         color: var(--tw-danger);
         opacity: 1;
       }
@@ -2703,6 +2877,72 @@
         min-width: 0;
         overflow-wrap: anywhere;
       }
+      .git-setup-action-card input,
+      .git-remote-form input {
+        background: var(--tw-panel-soft);
+        border: 1px solid var(--tw-border);
+        border-radius: 8px;
+        color: var(--tw-text-strong);
+        font: inherit;
+        min-height: 32px;
+        min-width: 0;
+        padding: 6px 8px;
+        width: 100%;
+      }
+      .git-setup-action-card input:focus,
+      .git-remote-form input:focus {
+        border-color: var(--tw-primary);
+        box-shadow: var(--tw-ring);
+        outline: none;
+      }
+      .git-setup-action-card button {
+        justify-content: center;
+        margin-top: 2px;
+        width: 100%;
+      }
+      .git-history-list {
+        border: 1px solid var(--tw-border);
+        border-radius: 8px;
+        display: grid;
+        overflow: hidden;
+      }
+      .git-history-row {
+        align-items: center;
+        background: rgba(15, 23, 42, 0.48);
+        border-bottom: 1px solid var(--tw-border);
+        display: grid;
+        gap: 10px;
+        grid-template-columns: minmax(0, 1fr) auto;
+        min-width: 0;
+        padding: 8px 10px;
+      }
+      .git-history-row:last-child {
+        border-bottom: 0;
+      }
+      .git-history-main {
+        display: grid;
+        gap: 2px;
+        min-width: 0;
+      }
+      .git-history-main strong,
+      .git-history-main span {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .git-history-main strong {
+        color: var(--tw-text-strong);
+        font-size: 13px;
+      }
+      .git-history-main span {
+        color: var(--tw-muted);
+        font-size: 12px;
+      }
+      .git-history-row button {
+        gap: 6px;
+        min-height: 30px;
+        padding: 5px 8px;
+      }
       .git-public-key {
         align-items: stretch;
         background: #020617;
@@ -2737,7 +2977,6 @@
       }
       .git-remote-form input {
         min-width: 0;
-        width: 100%;
       }
       .git-setup-result {
         background: rgba(15, 23, 42, 0.64);
@@ -2797,6 +3036,34 @@
         grid-template-columns: repeat(auto-fit, minmax(150px, max-content));
         justify-content: start;
         padding: 0;
+      }
+      .settings-maintenance-row {
+        align-items: center;
+        background: rgba(15, 23, 42, 0.48);
+        border: 1px solid var(--tw-border);
+        border-radius: 8px;
+        display: grid;
+        gap: 10px;
+        grid-template-columns: minmax(0, 1fr) auto;
+        max-width: 520px;
+        padding: 10px;
+      }
+      .settings-maintenance-row div {
+        display: grid;
+        gap: 2px;
+        min-width: 0;
+      }
+      .settings-maintenance-row strong {
+        color: var(--tw-text-strong);
+        font-size: 13px;
+      }
+      .settings-maintenance-row > div span {
+        color: var(--tw-muted);
+        font-size: 12px;
+      }
+      .settings-maintenance-row button {
+        gap: 6px;
+        white-space: nowrap;
       }
       .setting-field {
         display: grid;

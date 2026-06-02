@@ -10,7 +10,7 @@ export default defineConfig(({ mode }) => {
     },
     build: {
       outDir: "dist",
-      minify: isDevelopment ? false : "esbuild",
+      minify: isDevelopment ? false : "oxc",
       sourcemap: isDevelopment,
       lib: {
         entry: "src/main.tsx",

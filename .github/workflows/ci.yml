@@ -35,7 +35,19 @@ jobs:
         run: ruff format --check .
 
       - name: Python tests
-        run: python -m unittest tests.test_ha_codex_core
+        run: coverage run -m unittest tests.test_ha_codex_core
+
+      - name: Python coverage report
+        run: |
+          coverage xml -o coverage-python.xml
+          coverage report -m
+
+      - name: Upload Python coverage
+        uses: codecov/codecov-action@v5
+        with:
+          files: coverage-python.xml
+          flags: python
+          fail_ci_if_error: false
 
   frontend:
     name: Frontend
@@ -57,6 +69,23 @@ jobs:
 
       - name: Frontend tests
         run: node --test tests/frontend/*.test.mjs
+
+      - name: Frontend coverage report
+        run: |
+          node --test \
+            --experimental-test-coverage \
+            --test-coverage-include='frontend/src/**/*.ts' \
+            --test-coverage-include='frontend/src/**/*.tsx' \
+            --test-reporter=lcov \
+            --test-reporter-destination=coverage-frontend.lcov \
+            tests/frontend/*.test.mjs
+
+      - name: Upload frontend coverage
+        uses: codecov/codecov-action@v5
+        with:
+          files: coverage-frontend.lcov
+          flags: frontend
+          fail_ci_if_error: false
 
       - name: Frontend build
         run: npm run build --prefix frontend

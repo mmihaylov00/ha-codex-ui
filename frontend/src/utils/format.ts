@@ -8,6 +8,7 @@ export function formatRelativeTime(value: unknown, options: { pastOnly?: boolean
   const date = new Date(seconds * 1000);
   const deltaSeconds = Math.floor((Date.now() - date.getTime()) / 1000);
   const ageSeconds = Math.abs(deltaSeconds);
+  if (deltaSeconds < 0 && options.pastOnly) return "just now";
   const suffix = deltaSeconds >= 0 ? "ago" : "";
   const prefix = deltaSeconds < 0 ? "in " : "";
   if (ageSeconds < 60) return deltaSeconds < 0 && !options.pastOnly ? "in less than a minute" : "just now";

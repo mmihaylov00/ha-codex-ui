@@ -6,7 +6,24 @@ export interface HomeAssistant {
     ) => Promise<() => void> | (() => void) | void;
   };
   states?: Record<string, HassEntity>;
+  themes?: HomeAssistantThemes;
+  selectedTheme?: HomeAssistantThemeSettings | string | null;
   callWS<T = unknown>(payload: Record<string, unknown>): Promise<T>;
+}
+
+export interface HomeAssistantThemeSettings {
+  theme: string;
+  dark?: boolean;
+  primaryColor?: string;
+  accentColor?: string;
+}
+
+export interface HomeAssistantThemes {
+  default_theme?: string;
+  default_dark_theme?: string | null;
+  themes?: Record<string, unknown>;
+  darkMode?: boolean;
+  theme?: string;
 }
 
 export interface HassEntity {
@@ -164,6 +181,13 @@ export interface GitChanges {
   discarded_paths?: string[];
 }
 
+export interface GitCommit {
+  hash?: string;
+  short_hash?: string;
+  timestamp?: number;
+  subject?: string;
+}
+
 export interface GitSetupStatus {
   ok?: boolean;
   git_available?: boolean;
@@ -180,6 +204,7 @@ export interface GitSetupStatus {
   ssh_key_path?: string;
   ssh_public_key_path?: string;
   public_key?: string;
+  history?: GitCommit[];
   setup_complete?: boolean;
   missing?: string[];
 }

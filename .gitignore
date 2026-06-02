@@ -23,4 +23,7 @@ codex_home/
 .DS_Store
 .idea/
 .vscode/
+.coverage
+coverage-*.lcov
+coverage-*.xml
 test_workspaces/
