@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import configparser
 import difflib
-from pathlib import Path
 import shlex
 import subprocess
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
