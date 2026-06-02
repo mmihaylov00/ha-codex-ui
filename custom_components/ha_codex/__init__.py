@@ -36,23 +36,47 @@ try:
     import voluptuous as vol
     from homeassistant.helpers import config_validation as cv
 except ImportError:
-    CONFIG_SCHEMA = None
-else:
-    CONFIG_SCHEMA = vol.Schema(
-        {
-            vol.Optional(DOMAIN): vol.Schema(
-                {
-                    vol.Optional(CONF_WORKSPACE_PATH): cv.string,
-                    vol.Optional(CONF_CODEX_COMMAND): cv.string,
-                    vol.Optional(CONF_BRIDGE_URL): vol.Any(None, cv.string),
-                    vol.Optional(CONF_REQUIRE_ADMIN): cv.boolean,
-                    vol.Optional(CONF_ADDON_WRITE_SCOPE): vol.Any(None, cv.string, [cv.string]),
-                    vol.Optional(CONF_VALIDATION_COMMAND): vol.Any(None, cv.string, [cv.string]),
-                }
-            )
-        },
-        extra=vol.ALLOW_EXTRA,
-    )
+
+    class _VoluptuousFallback:
+        ALLOW_EXTRA = object()
+
+        @staticmethod
+        def Optional(key: str) -> str:
+            return key
+
+        @staticmethod
+        def Any(*validators: Any) -> Any:
+            return validators[0] if validators else None
+
+        @staticmethod
+        def Schema(schema: Any, *, extra: Any | None = None) -> Any:
+            return schema
+
+    class _ConfigValidationFallback:
+        string = str
+
+        @staticmethod
+        def boolean(value: Any) -> bool:
+            return bool(value)
+
+    vol = _VoluptuousFallback()
+    cv = _ConfigValidationFallback()
+
+CONFIG_SCHEMA = vol.Schema(
+    {
+        vol.Optional(DOMAIN): vol.Schema(
+            {
+                vol.Optional(CONF_WORKSPACE_PATH): cv.string,
+                vol.Optional(CONF_CODEX_COMMAND): cv.string,
+                vol.Optional(CONF_BRIDGE_URL): vol.Any(None, cv.string),
+                vol.Optional(CONF_REQUIRE_ADMIN): cv.boolean,
+                vol.Optional(CONF_ADDON_WRITE_SCOPE): vol.Any(None, cv.string, [cv.string]),
+                vol.Optional(CONF_VALIDATION_COMMAND): vol.Any(None, cv.string, [cv.string]),
+            }
+        )
+    },
+    extra=vol.ALLOW_EXTRA,
+)
 
 
 async def async_setup(hass: Any, config: dict[str, Any]) -> bool:
