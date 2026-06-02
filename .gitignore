@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/*.tsbuildinfo
+
+# Home Assistant runtime
+*.log
+*.db
+*.db-shm
+*.db-wal
+.storage/
+codex_home/
+
+# Local tooling
+.DS_Store
+.idea/
+.vscode/
+

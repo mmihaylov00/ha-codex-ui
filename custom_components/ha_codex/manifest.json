@@ -1,0 +1,11 @@
+{
+  "domain": "ha_codex",
+  "name": "HA Codex",
+  "codeowners": ["@mmihaylov00"],
+  "dependencies": ["frontend", "http", "panel_custom", "websocket_api"],
+  "documentation": "https://github.com/mmihaylov00/ha-codex-ui",
+  "integration_type": "service",
+  "iot_class": "local_push",
+  "issue_tracker": "https://github.com/mmihaylov00/ha-codex-ui/issues",
+  "version": "0.0.0"
+}

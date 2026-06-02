@@ -1,0 +1,26 @@
+{
+  "name": "ha-codex-panel",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "tsc --noEmit && vite build && node scripts/copy-panel.mjs",
+    "build:dev": "tsc --noEmit && vite build --mode development && node scripts/copy-panel.mjs",
+    "preview": "vite preview --host 0.0.0.0"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "^5.80.2",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "react-virtuoso": "^4.12.8",
+    "zustand": "^5.0.5"
+  },
+  "devDependencies": {
+    "@types/react": "^19.1.6",
+    "@types/react-dom": "^19.1.5",
+    "@vitejs/plugin-react": "^4.5.0",
+    "typescript": "^5.8.3",
+    "vite": "^6.3.5"
+  }
+}
