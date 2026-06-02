@@ -2636,7 +2636,9 @@ class GitOperationsHelperTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(generated_paths)
             self.assertNotEqual(generated_paths[0], private_key)
             self.assertFalse(generated_paths[0].exists())
-            self.assertFalse(generated_paths[0].with_suffix(f"{generated_paths[0].suffix}.pub").exists())
+            self.assertFalse(
+                generated_paths[0].with_suffix(f"{generated_paths[0].suffix}.pub").exists()
+            )
 
     async def test_git_setup_remote_and_pull_cover_fallback_branches(self):
         with TemporaryDirectory(dir=CONFIG_TEMP_DIR) as tmp:

@@ -44,8 +44,8 @@ feature ideas are welcome.
   bridge status, view logs, and see Codex runtime diagnostics from the panel.
 - **Git-assisted change review**: set up a Git remote, review diffs, commit,
   push, or discard selected files when Git is configured.
-- **UI-based setup**: install the integration files manually, configure from
-  **Settings > Devices & services**, and edit options later from **Configure**.
+- **UI-based setup**: install with HACS, configure from **Settings > Devices &
+  services**, and edit options later from **Configure**.
 
 ## Prerequisites
 
@@ -53,10 +53,6 @@ Before installing HA Codex UI, make sure you have:
 
 - **Home Assistant access**: use a Home Assistant instance you control and sign
   in with an administrator account. Keep HA Codex UI admin-only.
-- **Terminal access to Home Assistant**: the installation below uses a shell
-  that can access `/config`.
-- **Download tools**: the installation below uses `curl` and `unzip` in the
-  Home Assistant terminal.
 - **Codex access**: use an OpenAI or ChatGPT account with Codex access enabled.
 - **Supported runtime**: Home Assistant must run Python 3.10 or newer on Linux
   `x86_64` or `aarch64` so the pinned Codex SDK runtime can be installed.
@@ -67,66 +63,29 @@ Before installing HA Codex UI, make sure you have:
 
 ## Installation
 
-Follow these steps in order. The commands and UI values use the default HA Codex
-UI paths:
+Follow these steps in order. The UI values use the default HA Codex UI paths:
 
 - Codex runtime: pinned Python SDK runtime installed by Home Assistant
 - Codex credentials: `/config/codex_home`
 - Workspace path: `/config`
 - Bridge URL: `http://127.0.0.1:8765`
 
-### 1. Open a Home Assistant terminal
+### 1. Install HA Codex UI
 
-Home Assistant OS users usually need a terminal before they can install the
-integration files. The simplest path is Advanced SSH & Web Terminal:
+Install the integration files with HACS.
 
-1. Open Home Assistant.
-2. Go to **Settings > Apps** or **Settings > Add-ons**, depending on your Home
-   Assistant version.
-3. Open the app/add-on store.
-4. Search for **Advanced SSH & Web Terminal**.
-5. If it is not listed, add the Home Assistant Community Add-ons repository URL:
-   `https://github.com/hassio-addons/repository`.
-6. Install
-   [Advanced SSH & Web Terminal](https://github.com/hassio-addons/app-ssh).
-7. Enable **Start on boot**, **Watchdog**, and **Show in sidebar** if those
-   options are available.
-8. Start the app/add-on.
-9. Open its web terminal from the Home Assistant sidebar, or connect over SSH
-   using the app/add-on configuration.
-10. Work from the Home Assistant config directory:
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=mmihaylov00&repository=ha-codex-ui&category=integration)
 
-```sh
-cd /config
-```
+Recommended HACS install:
 
-### 2. Check terminal download tools
+1. Open **HACS** in Home Assistant.
+2. Add `https://github.com/mmihaylov00/ha-codex-ui` as a custom integration
+   repository if HA Codex UI is not already listed.
+3. Search for **HA Codex UI**.
+4. Download the integration.
+5. Restart Home Assistant Core.
 
-The manual HA Codex UI install downloads and extracts the GitHub release
-package. Check that `curl` and `unzip` are available:
-
-```sh
-curl --version
-unzip -v
-```
-
-If either command is missing in Advanced SSH & Web Terminal, install the missing
-package in that terminal app/add-on:
-
-1. Open the **Advanced SSH & Web Terminal** app/add-on page.
-2. Open **Configuration**.
-3. Add `curl` and `unzip` to the custom Alpine packages if your version exposes
-   a package list.
-4. Save the configuration.
-5. Restart the app/add-on.
-6. Open the web terminal again and run:
-
-```sh
-curl --version
-unzip -v
-```
-
-### 3. Codex runtime
+### 2. Codex runtime
 
 HA Codex UI uses OpenAI's Python Codex SDK by default. Home Assistant installs
 the pinned `openai-codex==0.1.0b2` dependency declared by the integration, and
@@ -143,29 +102,7 @@ git --version
 command -v ssh-keygen
 ```
 
-### 4. Install HA Codex UI manually
-
-Download the latest release package and extract it into Home Assistant's custom
-components directory. Run these commands from the Home Assistant terminal:
-
-```sh
-mkdir -p /config/custom_components/ha_codex
-curl -L -o /tmp/ha_codex.zip \
-  https://github.com/mmihaylov00/ha-codex-ui/releases/latest/download/ha_codex.zip
-rm -rf /config/custom_components/ha_codex
-mkdir -p /config/custom_components/ha_codex
-unzip -q /tmp/ha_codex.zip -d /config/custom_components/ha_codex
-test -f /config/custom_components/ha_codex/manifest.json
-test -f /config/custom_components/ha_codex/frontend/panel.js
-```
-
-Restart Home Assistant Core after the files are copied:
-
-```sh
-ha core restart
-```
-
-### 5. Add the Home Assistant integration
+### 3. Add the Home Assistant integration
 
 After Home Assistant restarts:
 
@@ -186,7 +123,7 @@ After Home Assistant restarts:
 To edit these values later, open **Settings > Devices & services**, select
 **HA Codex UI**, and choose **Configure**.
 
-### 6. Authenticate Codex
+### 4. Authenticate Codex
 
 HA Codex UI stores bridge credentials under `/config/codex_home`. Authenticate
 from the HA Codex UI Account tab:
@@ -204,7 +141,7 @@ from the HA Codex UI Account tab:
 
 ![HA Codex UI device login](docs/assets/login.png)
 
-### 7. Verify the first run
+### 5. Verify the first run
 
 1. Open **Codex** in the Home Assistant sidebar.
 2. Open **Settings > Debug** and confirm the runner, bridge URL, and workspace
@@ -227,7 +164,7 @@ the important values are created or edited:
 
 | Value | Where to set it | Default or path |
 | --- | --- | --- |
-| Integration files | Home Assistant terminal, installation step 4 | `/config/custom_components/ha_codex` |
+| Integration files | HACS | `/config/custom_components/ha_codex` |
 | Codex runtime | Home Assistant Python requirements | Pinned SDK runtime |
 | Integration options | **Settings > Devices & services > HA Codex UI > Configure** | See the table below |
 | Codex credentials | **Codex > Settings > Account** | `/config/codex_home` |
@@ -279,7 +216,7 @@ CODEX_HOME=/config/codex_home
 
 That means Codex credentials must be created under `/config/codex_home`, not the
 default home directory for your shell user. Use the installation step
-**6. Authenticate Codex** unless you need to troubleshoot login manually.
+**4. Authenticate Codex** unless you need to troubleshoot login manually.
 
 For Business, Enterprise, or Edu workspaces, a workspace owner/admin may need to
 enable Codex access for your user or role. OpenAI's
