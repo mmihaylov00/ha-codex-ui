@@ -5,6 +5,8 @@ import type { BridgeLog, CodexAccountStatus, CodexDeviceLoginStatus, GitChanges,
 import type { GitSelection } from "../features/git/gitUtils";
 import type { DebugTab, SettingsTab, Toast } from "../types/ui";
 
+export type GitSetupRunningAction = "key" | "remote" | "pull" | "branch" | `restore:${string}` | null;
+
 interface UiStore {
   status: Record<string, unknown>;
   bridgeLog: BridgeLog | null;
@@ -26,6 +28,7 @@ interface UiStore {
   gitSetupStatus: GitSetupStatus | null;
   gitSetupLoading: boolean;
   gitSetupActionRunning: boolean;
+  gitSetupRunningAction: GitSetupRunningAction;
   gitSetupResult: GitSetupResult | null;
   gitChanges: GitChanges | null;
   gitChangedCount: number;
@@ -64,7 +67,7 @@ interface UiStore {
   setGitPanelOpen: (open: boolean) => void;
   setGitSetupStatus: (status: GitSetupStatus | null) => void;
   setGitSetupLoading: (loading: boolean) => void;
-  setGitSetupActionRunning: (running: boolean) => void;
+  setGitSetupActionRunning: (running: boolean, action?: GitSetupRunningAction) => void;
   setGitSetupResult: (result: GitSetupResult | null) => void;
   setGitChanges: (changes: GitChanges | null) => void;
   setGitChangedCount: (count: number) => void;
@@ -106,6 +109,7 @@ export const useUiStore = create<UiStore>((set, get) => ({
   gitSetupStatus: null,
   gitSetupLoading: false,
   gitSetupActionRunning: false,
+  gitSetupRunningAction: null,
   gitSetupResult: null,
   gitChanges: null,
   gitChangedCount: 0,
@@ -144,7 +148,10 @@ export const useUiStore = create<UiStore>((set, get) => ({
   setGitPanelOpen: (gitPanelOpen) => set({ gitPanelOpen }),
   setGitSetupStatus: (gitSetupStatus) => set({ gitSetupStatus }),
   setGitSetupLoading: (gitSetupLoading) => set({ gitSetupLoading }),
-  setGitSetupActionRunning: (gitSetupActionRunning) => set({ gitSetupActionRunning }),
+  setGitSetupActionRunning: (gitSetupActionRunning, gitSetupRunningAction = null) => set({
+    gitSetupActionRunning,
+    gitSetupRunningAction: gitSetupActionRunning ? gitSetupRunningAction : null,
+  }),
   setGitSetupResult: (gitSetupResult) => set({ gitSetupResult }),
   setGitChanges: (gitChanges) => set({ gitChanges, gitSelection: defaultGitSelection(gitChanges?.files || []), gitVisibleLimit: get().gitPageSize }),
   setGitChangedCount: (gitChangedCount) => set({ gitChangedCount }),

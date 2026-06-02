@@ -7,6 +7,7 @@ import types
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 from custom_components.ha_codex.approvals import is_safe_read_only_command
 from custom_components.ha_codex.capabilities import (
@@ -2363,6 +2364,44 @@ class GitCommandTests(unittest.TestCase):
             ],
         )
 
+    def test_git_command_reads_git_real_worktree_without_subprocess(self):
+        with TemporaryDirectory(dir=CONFIG_TEMP_DIR) as tmp:
+            root = Path(tmp)
+            work_tree = root / "worktree"
+            git_dir = root / ".git-real"
+            work_tree.mkdir()
+            git_dir.mkdir()
+            (git_dir / "config").write_text(
+                f"[core]\n\tworktree = {work_tree}\n",
+                encoding="utf-8",
+            )
+            manager = CodexManager(
+                _FakeHass(root),
+                store=None,
+                workspace_path="/homeassistant",
+                codex_command="codex",
+                bridge_url=None,
+                addon_write_scope=None,
+                validation_command=None,
+            )
+
+            with patch("custom_components.ha_codex.git_ops.subprocess.run") as run:
+                run.side_effect = AssertionError("subprocess.run must not run in _git_work_tree")
+                command = manager._git_command(["status", "--short"])
+
+        self.assertEqual(
+            command,
+            [
+                "git",
+                "-C",
+                str(work_tree),
+                f"--git-dir={git_dir}",
+                f"--work-tree={work_tree}",
+                "status",
+                "--short",
+            ],
+        )
+
     def test_display_path_diff_resolves_under_config(self):
         with TemporaryDirectory(dir=CONFIG_TEMP_DIR) as tmp:
             root = Path(tmp)
@@ -3649,6 +3688,57 @@ class WebsocketCommandTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(results[42]["old_path"], "old.yaml")
         self.assertEqual(results[45]["validation"]["status"], "passed")
         self.assertIn(("send", "session-1", "Fix it", "Run this"), manager.calls)
+
+    async def test_git_setup_websocket_errors_return_diagnostics(self):
+        websocket = _load_websocket_module()
+        manager = _FakeWebsocketManager()
+        websocket.CodexManager = _FakeWebsocketManager
+        hass = types.SimpleNamespace(data={websocket.DOMAIN: manager})
+        connection = _FakeConnection()
+
+        async def fail_status():
+            raise RuntimeError("blocking call in setup status")
+
+        async def fail_pull():
+            raise RuntimeError("pull exploded")
+
+        async def fail_branch(_branch):
+            raise RuntimeError("branch exploded")
+
+        async def fail_restore(_commit):
+            raise RuntimeError("restore exploded")
+
+        manager.async_git_setup_status = fail_status
+        manager.async_git_setup_pull = fail_pull
+        manager.async_git_setup_change_branch = fail_branch
+        manager.async_git_setup_checkout_commit = fail_restore
+
+        await websocket.websocket_git_setup_status(hass, connection, {"id": 1})
+        await websocket.websocket_git_setup_pull(hass, connection, {"id": 2})
+        await websocket.websocket_git_setup_change_branch(
+            hass, connection, {"id": 3, "branch": "main"}
+        )
+        await websocket.websocket_git_setup_checkout_commit(
+            hass, connection, {"id": 4, "commit": "abc123d"}
+        )
+
+        results = dict(connection.results)
+        self.assertEqual(results[1]["ok"], False)
+        self.assertEqual(results[1]["setup_complete"], False)
+        self.assertEqual(results[1]["missing"], ["setup status"])
+        self.assertEqual(results[1]["repo_error"], "RuntimeError: blocking call in setup status")
+        self.assertEqual(
+            results[2],
+            {"ok": False, "step": "pull", "stderr": "RuntimeError: pull exploded"},
+        )
+        self.assertEqual(
+            results[3],
+            {"ok": False, "step": "change_branch", "stderr": "RuntimeError: branch exploded"},
+        )
+        self.assertEqual(
+            results[4],
+            {"ok": False, "step": "restore", "stderr": "RuntimeError: restore exploded"},
+        )
 
     async def test_websocket_errors_raise_homeassistant_error(self):
         websocket = _load_websocket_module()

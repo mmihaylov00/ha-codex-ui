@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import configparser
 import difflib
 from pathlib import Path
 import shlex
@@ -1380,17 +1381,12 @@ class GitOperationsMixin:
         return str(Path(self.hass.config.path()))
 
     def _git_work_tree(self, git_dir: Path, fallback: Path) -> str:
-        try:
-            configured = subprocess.run(
-                ["git", f"--git-dir={git_dir}", "config", "--get", "core.worktree"],
-                text=True,
-                capture_output=True,
-                timeout=10,
-                check=False,
-            )
-        except (OSError, subprocess.SubprocessError):
-            return str(fallback)
-        work_tree = configured.stdout.strip()
+        work_tree = self._git_config_value(git_dir / "config", "core", "worktree")
+        if work_tree:
+            work_tree_path = Path(work_tree).expanduser()
+            if not work_tree_path.is_absolute():
+                work_tree_path = (git_dir / work_tree_path).resolve(strict=False)
+            work_tree = str(work_tree_path)
         if (
             work_tree == "/"
             and fallback == Path(self.hass.config.path())
@@ -1398,3 +1394,15 @@ class GitOperationsMixin:
         ):
             return str(fallback)
         return work_tree or str(fallback)
+
+    def _git_config_value(self, config_path: Path, section: str, key: str) -> str:
+        parser = configparser.RawConfigParser(strict=False)
+        try:
+            with config_path.open(encoding="utf-8") as config_file:
+                parser.read_file(config_file)
+        except (configparser.Error, OSError, UnicodeDecodeError):
+            return ""
+        try:
+            return parser.get(section, key).strip()
+        except (configparser.Error, KeyError):
+            return ""

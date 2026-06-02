@@ -2,7 +2,7 @@ import { useLayoutEffect, useRef, useState } from "react";
 import { Icon } from "./Icon";
 import { useUiStore } from "../stores/uiStore";
 import { useChatStore } from "../stores/chatStore";
-import type { GitCommit, GitSetupResult, HaCodexSettings, ModelPreset, RunSettings } from "../types/ha";
+import type { GitCommit, HaCodexSettings, ModelPreset, RunSettings } from "../types/ha";
 import type { SettingsTab } from "../types/ui";
 import { gitSetupSummary, isGitSetupReady, paginateGitHistory } from "../features/git/gitUtils";
 import { BUILT_IN_MODEL_PRESET_IDS, deleteModelPreset, presetIdFromLabel, upsertModelPreset } from "../features/settings/runtimeSettingsUtils";
@@ -225,6 +225,7 @@ function GitSetupTab({
   const status = useUiStore((state) => state.gitSetupStatus);
   const loading = useUiStore((state) => state.gitSetupLoading);
   const running = useUiStore((state) => state.gitSetupActionRunning);
+  const runningAction = useUiStore((state) => state.gitSetupRunningAction);
   const result = useUiStore((state) => state.gitSetupResult);
   const showToast = useUiStore((state) => state.showToast);
   const ready = isGitSetupReady(status);
@@ -261,6 +262,7 @@ function GitSetupTab({
       <div className="git-setup-cards">
         <GitSetupGitCard loading={loading} ready={ready} running={running} summary={summary} onRefresh={onRefresh} />
         <GitSetupRepositoryCard
+          actionRunning={runningAction === "remote"}
           remoteDraft={remoteDraft}
           remoteUrl={status?.remote_url || ""}
           repoError={status?.repo_error || ""}
@@ -271,6 +273,7 @@ function GitSetupTab({
           onRemoteSave={onRemoteSave}
         />
         <GitSetupSshKeyCard
+          actionRunning={runningAction === "key"}
           keyCopied={keyCopied}
           publicKey={publicKey}
           remoteUsesSsh={status?.remote_uses_ssh === true}
@@ -279,19 +282,13 @@ function GitSetupTab({
           onCopyPublicKey={copyPublicKey}
           onGenerateKey={onGenerateKey}
         />
-        <GitSetupBranchCard branch={branchDraft} currentBranch={status?.branch || ""} upstream={status?.upstream || ""} running={running} repository={status?.repository === true} onBranchChange={setBranchDraft} onSubmit={onBranchChange} />
-        <GitSetupPullCard onPull={onPull} running={running} remoteConfigured={status?.remote_configured === true} incomingCount={status?.incoming_count || 0} />
+        <GitSetupBranchCard actionRunning={runningAction === "branch"} branch={branchDraft} currentBranch={status?.branch || ""} upstream={status?.upstream || ""} running={running} repository={status?.repository === true} onBranchChange={setBranchDraft} onSubmit={onBranchChange} />
+        <GitSetupPullCard actionRunning={runningAction === "pull"} onPull={onPull} running={running} remoteConfigured={status?.remote_configured === true} incomingCount={status?.incoming_count || 0} />
       </div>
 
-      <GitHistorySection history={status?.history || []} running={running} onCheckout={onCommitCheckout} />
-
-      <GitSetupResultView result={result} />
+      <GitHistorySection history={status?.history || []} running={running} runningAction={runningAction} onCheckout={onCommitCheckout} />
     </div>
   );
-}
-
-function GitSetupCard({ label, value, detail, ok }: { label: string; value: string; detail: string; ok: boolean }) {
-  return <div className={`runtime-card ${ok ? "success" : "warning"}`}><span>{label}</span><strong>{value}</strong><small title={detail}>{detail}</small></div>;
 }
 
 function GitSetupGitCard({
@@ -309,10 +306,14 @@ function GitSetupGitCard({
 }) {
   return (
     <div className={`runtime-card git-setup-action-card ${summary.tone === "success" ? "success" : "warning"}`}>
-      <span>Git</span>
-      <strong>{summary.title}</strong>
-      <small title={summary.detail}>{summary.detail}</small>
-      <button className="ghost" onClick={onRefresh} disabled={loading || running}>
+      <span className="git-card-label">Git</span>
+      <strong className="git-card-status">{summary.title}</strong>
+      <div className="git-card-spacer" aria-hidden="true" />
+      <div className="git-card-content">
+        <small title={summary.detail}>{summary.detail}</small>
+      </div>
+      <div className="git-card-spacer" aria-hidden="true" />
+      <button className="git-card-action" onClick={onRefresh} disabled={loading || running}>
         <Icon icon={loading ? "mdi:progress-clock" : ready ? "mdi:source-branch-check" : "mdi:refresh"} />
         <span>{loading ? "Checking..." : "Refresh"}</span>
       </button>
@@ -321,6 +322,7 @@ function GitSetupGitCard({
 }
 
 function GitSetupRepositoryCard({
+  actionRunning,
   remoteDraft,
   remoteUrl,
   repoError,
@@ -330,6 +332,7 @@ function GitSetupRepositoryCard({
   onRemoteChange,
   onRemoteSave,
 }: {
+  actionRunning: boolean;
   remoteDraft: string;
   remoteUrl: string;
   repoError: string;
@@ -343,21 +346,24 @@ function GitSetupRepositoryCard({
   const detail = repoError || remoteUrl || (remoteConfigured ? "Origin remote is configured." : "Set the origin remote URL.");
   return (
     <div className={`runtime-card git-setup-action-card ${repository ? "success" : "warning"}`}>
-      <span>Repository</span>
-      <strong>{value}</strong>
-      <small title={detail}>{detail}</small>
-      <div className="git-remote-form">
+      <span className="git-card-label">Repository</span>
+      <strong className="git-card-status">{value}</strong>
+      <div className="git-card-spacer" aria-hidden="true" />
+      <div className="git-card-content">
+        <small title={detail}>{detail}</small>
         <input value={remoteDraft} onChange={(event) => onRemoteChange(event.currentTarget.value)} placeholder="git@github.com:owner/repository.git" aria-label="Git origin remote URL" />
-        <button onClick={() => onRemoteSave(remoteDraft)} disabled={running || !remoteDraft.trim()}>
-          <Icon icon={running ? "mdi:progress-clock" : "mdi:link-variant-plus"} />
-          <span>Save</span>
-        </button>
       </div>
+      <div className="git-card-spacer" aria-hidden="true" />
+      <button className="git-card-action" onClick={() => onRemoteSave(remoteDraft)} disabled={running || !remoteDraft.trim()}>
+        <Icon icon={actionRunning ? "mdi:progress-clock" : "mdi:link-variant-plus"} />
+        <span>Save</span>
+      </button>
     </div>
   );
 }
 
 function GitSetupSshKeyCard({
+  actionRunning,
   keyCopied,
   publicKey,
   remoteUsesSsh,
@@ -366,6 +372,7 @@ function GitSetupSshKeyCard({
   onCopyPublicKey,
   onGenerateKey,
 }: {
+  actionRunning: boolean;
   keyCopied: boolean;
   publicKey: string;
   remoteUsesSsh: boolean;
@@ -377,10 +384,11 @@ function GitSetupSshKeyCard({
   const detail = publicKey ? "Public key ready to copy." : remoteUsesSsh ? "Generate a key for SSH remotes." : "Only needed for SSH remotes.";
   return (
     <div className={`runtime-card git-setup-action-card ${sshKeyExists || !remoteUsesSsh ? "success" : "warning"}`}>
-      <span>SSH key</span>
-      <strong>{sshKeyExists ? "Created" : "Missing"}</strong>
-      <small title={detail}>{detail}</small>
-      <div className="git-public-key-row">
+      <span className="git-card-label">SSH key</span>
+      <strong className="git-card-status">{sshKeyExists ? "Created" : "Missing"}</strong>
+      <div className="git-card-spacer" aria-hidden="true" />
+      <div className="git-card-content">
+        <small title={detail}>{detail}</small>
         {publicKey ? (
           <div className={`git-public-key git-public-key-inline ${keyCopied ? "copied" : ""}`}>
             <pre>{publicKey}</pre>
@@ -391,17 +399,19 @@ function GitSetupSshKeyCard({
         ) : (
           <span className="muted">Generate a key to show the public key.</span>
         )}
-        <button onClick={onGenerateKey} disabled={running}>
-          <Icon icon={running ? "mdi:progress-clock" : sshKeyExists ? "mdi:key-change" : "mdi:key-plus"} />
-          <span>{sshKeyExists ? "Recreate key" : "Generate key"}</span>
-        </button>
+        <a className="git-ssh-keys-link" href="https://docs.github.com/en/authentication/connecting-to-github-with-ssh/adding-a-new-ssh-key-to-your-github-account" target="_blank" rel="noreferrer">GitHub SSH keys</a>
       </div>
-      <a className="git-ssh-keys-link" href="https://docs.github.com/en/authentication/connecting-to-github-with-ssh/adding-a-new-ssh-key-to-your-github-account" target="_blank" rel="noreferrer">GitHub SSH keys</a>
+      <div className="git-card-spacer" aria-hidden="true" />
+      <button className="git-card-action" onClick={onGenerateKey} disabled={running}>
+        <Icon icon={actionRunning ? "mdi:progress-clock" : sshKeyExists ? "mdi:key-change" : "mdi:key-plus"} />
+        <span>{sshKeyExists ? "Recreate key" : "Generate key"}</span>
+      </button>
     </div>
   );
 }
 
 function GitSetupBranchCard({
+  actionRunning,
   branch,
   currentBranch,
   upstream,
@@ -410,6 +420,7 @@ function GitSetupBranchCard({
   onBranchChange,
   onSubmit,
 }: {
+  actionRunning: boolean;
   branch: string;
   currentBranch: string;
   upstream: string;
@@ -421,6 +432,7 @@ function GitSetupBranchCard({
   const value = branch.trim();
   const unchanged = value === currentBranch;
   const detail = upstream || (repository ? "Enter a local or origin branch." : "Initialize a repository first.");
+  const status = currentBranch || "Not checked out";
   return (
     <form
       className={`runtime-card git-setup-action-card ${currentBranch ? "success" : "warning"}`}
@@ -429,32 +441,43 @@ function GitSetupBranchCard({
         onSubmit(value);
       }}
     >
-      <span>Branch</span>
-      <input value={branch} onChange={(event) => onBranchChange(event.currentTarget.value)} placeholder="main" aria-label="Git branch name" />
-      <small title={detail}>{detail}</small>
-      <button type="submit" disabled={running || !repository || !value || unchanged}>
-        <Icon icon={running ? "mdi:progress-clock" : "mdi:source-branch"} />
-        Checkout
+      <span className="git-card-label">Branch</span>
+      <strong className="git-card-status">{status}</strong>
+      <div className="git-card-spacer" aria-hidden="true" />
+      <div className="git-card-content">
+        <small title={detail}>{detail}</small>
+        <input value={branch} onChange={(event) => onBranchChange(event.currentTarget.value)} placeholder="main" aria-label="Git branch name" />
+      </div>
+      <div className="git-card-spacer" aria-hidden="true" />
+      <button className="git-card-action" type="submit" disabled={running || !repository || !value || unchanged}>
+        <Icon icon={actionRunning ? "mdi:progress-clock" : "mdi:source-branch"} />
+        <span>Checkout</span>
       </button>
     </form>
   );
 }
 
-function GitSetupPullCard({ onPull, running, remoteConfigured, incomingCount }: { onPull: () => void; running: boolean; remoteConfigured: boolean; incomingCount: number }) {
+function GitSetupPullCard({ actionRunning, onPull, running, remoteConfigured, incomingCount }: { actionRunning: boolean; onPull: () => void; running: boolean; remoteConfigured: boolean; incomingCount: number }) {
   const label = incomingCount > 0 ? `Pull ${incomingCount} incoming ${incomingCount === 1 ? "commit" : "commits"}` : "Pull";
+  const detail = incomingCount > 0 ? "Incoming commits are available from origin." : "Fetch latest changes from origin.";
   return (
     <div className={`runtime-card git-setup-action-card ${remoteConfigured ? "success" : "warning"}`}>
-      <span>Pull</span>
-      <strong>{remoteConfigured ? "Ready" : "Unavailable"}</strong>
-      <button onClick={onPull} disabled={running || !remoteConfigured}>
-        <Icon icon={running ? "mdi:progress-clock" : "mdi:source-pull"} />
-        {label}
+      <span className="git-card-label">Pull</span>
+      <strong className="git-card-status">{remoteConfigured ? "Ready" : "Unavailable"}</strong>
+      <div className="git-card-spacer" aria-hidden="true" />
+      <div className="git-card-content">
+        <small title={detail}>{detail}</small>
+      </div>
+      <div className="git-card-spacer" aria-hidden="true" />
+      <button className="git-card-action" onClick={onPull} disabled={running || !remoteConfigured}>
+        <Icon icon={actionRunning ? "mdi:progress-clock" : "mdi:source-pull"} />
+        <span>{label}</span>
       </button>
     </div>
   );
 }
 
-function GitHistorySection({ history, running, onCheckout }: { history: GitCommit[]; running: boolean; onCheckout: (commit: string) => void }) {
+function GitHistorySection({ history, running, runningAction, onCheckout }: { history: GitCommit[]; running: boolean; runningAction: string | null; onCheckout: (commit: string) => void }) {
   const [page, setPage] = useState(0);
   const paged = paginateGitHistory(history, page, 6);
 
@@ -484,6 +507,7 @@ function GitHistorySection({ history, running, onCheckout }: { history: GitCommi
             const hash = commit.hash || commit.short_hash || "";
             const shortHash = commit.short_hash || hash.slice(0, 7);
             const current = paged.start + index === 1;
+            const restoring = runningAction === `restore:${hash}`;
             return (
               <div className="git-history-row" key={hash || index}>
                 <div className="git-history-main">
@@ -491,7 +515,7 @@ function GitHistorySection({ history, running, onCheckout }: { history: GitCommi
                   <span title={formatTimestampTitle(commit.timestamp)}>{shortHash}{commit.timestamp ? ` · ${formatRunTime(commit.timestamp)}` : ""}</span>
                 </div>
                 <button onClick={() => onCheckout(hash)} disabled={running || !hash || current}>
-                  <Icon icon={running ? "mdi:progress-clock" : current ? "mdi:check" : "mdi:restore"} />
+                  <Icon icon={restoring ? "mdi:progress-clock" : current ? "mdi:check" : "mdi:restore"} />
                   <span>{current ? "Current" : "Restore"}</span>
                 </button>
               </div>
@@ -503,26 +527,6 @@ function GitHistorySection({ history, running, onCheckout }: { history: GitCommi
       )}
     </section>
   );
-}
-
-function GitSetupResultView({ result }: { result: GitSetupResult | null }) {
-  if (!result) return null;
-  const output = gitSetupResultOutput(result);
-  return (
-    <section className={`git-setup-result ${result.ok ? "success" : "error"}`}>
-      <strong>{result.ok ? "Last Git setup action completed" : "Last Git setup action failed"}</strong>
-      {result.step ? <span>{result.step}</span> : null}
-      {output ? <pre>{output}</pre> : null}
-    </section>
-  );
-}
-
-function gitSetupResultOutput(result: GitSetupResult): string {
-  return stripAnsi([
-    result.stdout,
-    result.stderr,
-    ...(result.results || []).flatMap((item) => [item.stdout, item.stderr]),
-  ].filter(Boolean).join("\n")).trim();
 }
 
 function RunSettingsTab({ settings, onSave, onArchiveCleanup }: { settings: HaCodexSettings; onSave: (settings: Partial<HaCodexSettings>) => void; onArchiveCleanup: () => void }) {

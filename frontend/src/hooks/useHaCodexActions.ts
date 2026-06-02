@@ -632,7 +632,7 @@ export function useHaCodexActions(api: HaCodexApi) {
         if (next && !ui().gitChanges) await loadGitChanges(false);
       },
       generateGitSetupKey: async () => {
-        ui().setGitSetupActionRunning(true);
+        ui().setGitSetupActionRunning(true, "key");
         ui().setGitSetupResult(null);
         try {
           const result = await api.gitSetupGenerateKey();
@@ -650,7 +650,7 @@ export function useHaCodexActions(api: HaCodexApi) {
           ui().showToast("Remote URL is required", "error");
           return;
         }
-        ui().setGitSetupActionRunning(true);
+        ui().setGitSetupActionRunning(true, "remote");
         ui().setGitSetupResult(null);
         try {
           const result = await api.gitSetupSetRemote(value);
@@ -664,7 +664,7 @@ export function useHaCodexActions(api: HaCodexApi) {
         }
       },
       pullGitSetupRemote: async () => {
-        ui().setGitSetupActionRunning(true);
+        ui().setGitSetupActionRunning(true, "pull");
         ui().setGitSetupResult(null);
         try {
           let result: GitSetupResult;
@@ -694,7 +694,7 @@ export function useHaCodexActions(api: HaCodexApi) {
           ui().showToast("Branch name is required", "error");
           return;
         }
-        ui().setGitSetupActionRunning(true);
+        ui().setGitSetupActionRunning(true, "branch");
         ui().setGitSetupResult(null);
         try {
           let result: GitSetupResult;
@@ -722,7 +722,7 @@ export function useHaCodexActions(api: HaCodexApi) {
           ui().showToast("Commit is required", "error");
           return;
         }
-        ui().setGitSetupActionRunning(true);
+        ui().setGitSetupActionRunning(true, `restore:${value}`);
         ui().setGitSetupResult(null);
         try {
           let result: GitSetupResult;

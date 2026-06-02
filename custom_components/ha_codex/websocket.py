@@ -75,6 +75,15 @@ def _raise_value_error(err: ValueError) -> None:
     raise HomeAssistantError(str(err)) from err
 
 
+def _exception_message(err: Exception) -> str:
+    message = str(err).strip()
+    return f"{type(err).__name__}: {message}" if message else type(err).__name__
+
+
+def _git_setup_error_result(step: str, err: Exception) -> dict[str, Any]:
+    return {"ok": False, "step": step, "stderr": _exception_message(err)}
+
+
 @websocket_api.websocket_command({"type": "ha_codex/status"})
 @websocket_api.require_admin
 @websocket_api.async_response
@@ -684,7 +693,16 @@ async def websocket_git_setup_status(
     msg: dict[str, Any],
 ) -> None:
     """Return Git setup status."""
-    connection.send_result(msg["id"], await _manager(hass).async_git_setup_status())
+    try:
+        result = await _manager(hass).async_git_setup_status()
+    except Exception as err:  # noqa: BLE001 - keep Git setup diagnostics out of HA unknown_error.
+        result = {
+            "ok": False,
+            "setup_complete": False,
+            "missing": ["setup status"],
+            "repo_error": _exception_message(err),
+        }
+    connection.send_result(msg["id"], result)
 
 
 @websocket_api.websocket_command({"type": "ha_codex/git/setup/generate_key"})
@@ -729,7 +747,11 @@ async def websocket_git_setup_pull(
     msg: dict[str, Any],
 ) -> None:
     """Pull Git origin."""
-    connection.send_result(msg["id"], await _manager(hass).async_git_setup_pull())
+    try:
+        result = await _manager(hass).async_git_setup_pull()
+    except Exception as err:  # noqa: BLE001 - return a diagnosable Git setup result.
+        result = _git_setup_error_result("pull", err)
+    connection.send_result(msg["id"], result)
 
 
 @websocket_api.websocket_command(
@@ -750,6 +772,8 @@ async def websocket_git_setup_change_branch(
         result = await _manager(hass).async_git_setup_change_branch(msg["branch"])
     except ValueError as err:
         _raise_value_error(err)
+    except Exception as err:  # noqa: BLE001 - return a diagnosable Git setup result.
+        result = _git_setup_error_result("change_branch", err)
     connection.send_result(msg["id"], result)
 
 
@@ -771,6 +795,8 @@ async def websocket_git_setup_checkout_commit(
         result = await _manager(hass).async_git_setup_checkout_commit(msg["commit"])
     except ValueError as err:
         _raise_value_error(err)
+    except Exception as err:  # noqa: BLE001 - return a diagnosable Git setup result.
+        result = _git_setup_error_result("restore", err)
     connection.send_result(msg["id"], result)
 
 
