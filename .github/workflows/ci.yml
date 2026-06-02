@@ -2,6 +2,7 @@ name: CI
 
 permissions:
   contents: read
+  id-token: write
 
 on:
   workflow_dispatch:
@@ -45,9 +46,12 @@ jobs:
       - name: Upload Python coverage
         uses: codecov/codecov-action@v5
         with:
+          disable_search: true
+          fail_ci_if_error: true
           files: coverage-python.xml
           flags: python
-          fail_ci_if_error: false
+          use_oidc: true
+          verbose: true
 
   frontend:
     name: Frontend
@@ -83,9 +87,12 @@ jobs:
       - name: Upload frontend coverage
         uses: codecov/codecov-action@v5
         with:
+          disable_search: true
+          fail_ci_if_error: true
           files: coverage-frontend.lcov
           flags: frontend
-          fail_ci_if_error: false
+          use_oidc: true
+          verbose: true
 
       - name: Frontend build
         run: npm run build --prefix frontend

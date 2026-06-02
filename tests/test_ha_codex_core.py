@@ -2645,6 +2645,8 @@ class GitReviewOperationTests(unittest.IsolatedAsyncioTestCase):
                 capture_output=True,
                 check=True,
             )
+            _git(upstream, "config", "user.email", "ha-codex@example.test")
+            _git(upstream, "config", "user.name", "HA Codex")
             _git(upstream, "checkout", "-b", "dev")
             (upstream / "configuration.yaml").write_text(
                 "homeassistant:\n  name: Dev\n",

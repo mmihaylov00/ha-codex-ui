@@ -1,5 +1,5 @@
 [![CI](https://img.shields.io/github/actions/workflow/status/mmihaylov00/ha-codex-ui/ci.yml?branch=main&label=CI&logo=github&style=popout)](https://github.com/mmihaylov00/ha-codex-ui/actions/workflows/ci.yml?query=branch%3Amain)
-[![codecov](https://codecov.io/gh/mmihaylov00/ha-codex-ui/graph/badge.svg)](https://codecov.io/gh/mmihaylov00/ha-codex-ui)
+[![codecov](https://codecov.io/gh/mmihaylov00/ha-codex-ui/branch/main/graph/badge.svg)](https://codecov.io/gh/mmihaylov00/ha-codex-ui)
 [![Validate with hassfest](https://github.com/mmihaylov00/ha-codex-ui/actions/workflows/hassfest.yml/badge.svg)](https://github.com/mmihaylov00/ha-codex-ui/actions/workflows/hassfest.yml)
 [![GitHub Release][releases-shield]][releases]
 [![GitHub All Releases][downloads-total-shield]][releases]
