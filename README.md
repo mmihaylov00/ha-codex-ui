@@ -1,3 +1,9 @@
+[![CI](https://img.shields.io/github/actions/workflow/status/mmihaylov00/ha-codex-ui/ci.yml?branch=main&label=CI&logo=github&style=popout)](https://github.com/mmihaylov00/ha-codex-ui/actions/workflows/ci.yml?query=branch%3Amain)
+[![Validate with hassfest](https://github.com/mmihaylov00/ha-codex-ui/actions/workflows/hassfest.yml/badge.svg)](https://github.com/mmihaylov00/ha-codex-ui/actions/workflows/hassfest.yml)
+[![GitHub Release][releases-shield]][releases]
+[![GitHub All Releases][downloads-total-shield]][releases]
+[![Revolut.Me][revolut-me-shield]][revolut-me]
+
 # HA Codex UI
 
 HA Codex UI is a Home Assistant custom integration that adds an admin-only Codex
@@ -356,6 +362,12 @@ The frontend build writes the production module to:
 ```text
 custom_components/ha_codex/frontend/panel.js
 ```
+
+[releases]: https://github.com/mmihaylov00/ha-codex-ui/releases
+[releases-shield]: https://img.shields.io/github/release/mmihaylov00/ha-codex-ui.svg?style=popout
+[downloads-total-shield]: https://img.shields.io/github/downloads/mmihaylov00/ha-codex-ui/total?style=popout
+[revolut-me]: https://revolut.me/mmihaylov00
+[revolut-me-shield]: https://img.shields.io/static/v1.svg?label=%20&message=Revolut&logo=revolut&style=popout
 
 ## License
 
