@@ -12,70 +12,19 @@ install it only on Home Assistant instances you control.
 
 ## Features
 
-- **Admin-only Home Assistant sidebar panel**: adds a **Codex** panel inside
-  Home Assistant and can restrict access to Home Assistant administrators with
-  `require_admin: true`.
-- **UI-based setup and options**: configure the integration from
-  **Settings > Devices & services**, then edit the same options later from the
-  integration's **Configure** action.
-- **Persistent Codex chat sessions**: create, rename, archive, restore, retry,
-  and continue Codex sessions from the sidebar.
-- **Streaming Codex runs**: streams Codex responses, tool activity, command
-  output, file-change summaries, validation results, and errors back into the
-  conversation.
-- **Queued follow-up messages**: queue messages while a run is busy, edit queued
-  messages, steer the active run, and continue automatically when possible.
-- **Run plan review**: request plans automatically, always, or never; approve,
-  revise, or cancel a pending plan before Codex edits files.
-- **Codex questions**: answer structured follow-up questions from Codex without
-  leaving the panel.
-- **Command approvals**: review and approve or reject shell commands before they
-  run.
-- **Restart approval workflow**: detect Home Assistant restart requirements,
-  approve a restart immediately, or schedule it after pending chats finish.
-- **Rollback support**: create run checkpoints and roll back a completed Codex
-  run when rollback is available.
-- **Git setup page**: generate an SSH key, copy the public key, link an `origin`
-  remote, pull from the remote, and inspect Git setup health from Settings.
-- **Git review drawer**: review changed files and inline diffs, select files,
-  commit selected changes, push to `origin`, and discard selected changes.
-- **Git safety gating**: hides the Git review button and drawer until Git is
-  initialized, an `origin` remote exists, and required SSH setup is complete.
-- **Home Assistant validation**: run `ha core check` or
-  `hass --script check_config` when available, show validation status, summarize
-  affected domains, and offer safe reload actions when supported.
-- **Context picker**: attach Home Assistant entities, devices, areas,
-  automations, scripts, logs, and configuration files to a Codex prompt.
-- **Config-file previews**: load selected configuration file content as prompt
-  context with size and truncation metadata.
-- **Automation and script builder**: guided prompts for creating automations,
-  fixing automations/scripts, creating scripts, converting automations/scripts to
-  blueprints, and explaining or simplifying existing automations/scripts.
-- **Run controls per chat**: choose automatic or manual mode, model preset,
-  reasoning effort, verbosity, plan mode, validation depth, tool visibility, and
-  approval mode.
-- **Model preset settings**: use built-in model presets and add, edit, or delete
-  custom presets.
-- **Context budget display**: track selected context usage against the configured
-  context budget before sending a prompt.
-- **Codex account tab**: start device-code login, cancel login, log out, inspect
-  account status, and view reported Codex usage remaining.
-- **Packaged bridge mode**: runs Codex through a local bridge outside Home
-  Assistant Core, isolates credentials under `/config/codex_home`, streams
-  approvals, and retries once after a bridge restart when the bridge is
-  unavailable.
-- **Bridge controls and logs**: start or restart the bridge, inspect runtime
-  health, view and clear bridge logs, and see bridge uptime.
-- **Runtime diagnostics**: inspect runner type, Codex command/version, bridge
-  URL, workspace path, add-on paths, validation command, usage data, and current
-  sessions.
-- **Add-on path support**: expose visible add-on folders to Codex through
-  `addon_write_scope`.
-- **Home Assistant registry awareness**: uses entity, device, area, and service
-  registry data for context selection and builder controls.
-- **HACS-ready packaging**: ships all runtime files under
-  `custom_components/ha_codex`, includes a built panel bundle, HACS metadata,
-  hassfest validation, CI, and zipped release assets.
+- **Codex inside Home Assistant**: adds an admin-only **Codex** sidebar panel for
+  chatting with Codex about your Home Assistant configuration.
+- **Home Assistant-aware context**: attach entities, devices, areas,
+  automations, scripts, logs, and configuration files so Codex has the right
+  context for each request.
+- **Safer editing workflow**: review plans, command approvals, file changes, and
+  restart requests before changes are applied.
+- **Validation and troubleshooting**: run Home Assistant config checks, inspect
+  bridge status, view logs, and see Codex runtime diagnostics from the panel.
+- **Git-assisted change review**: set up a Git remote, review diffs, commit,
+  push, or discard selected files when Git is configured.
+- **UI-based setup**: install with HACS, configure from **Settings > Devices &
+  services**, and edit options later from **Configure**.
 
 ## Prerequisites
 
