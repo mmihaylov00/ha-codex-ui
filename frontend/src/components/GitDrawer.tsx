@@ -29,7 +29,6 @@ interface GitDrawerProps {
   onLoadMore: () => void;
   onToggleFile: (path: string, oldPath?: string) => void;
   onCommit: (message: string) => void;
-  onDiscard: () => void;
 }
 
 export function GitDrawer(props: GitDrawerProps) {
@@ -45,7 +44,7 @@ export function GitDrawer(props: GitDrawerProps) {
         </div>
       </header>
       <div className="drawer-body git-review"><GitChanges {...props} /></div>
-      <CommitBox onCommit={props.onCommit} onDiscard={props.onDiscard} />
+      <CommitBox onCommit={props.onCommit} />
     </aside>
   );
 }
@@ -181,16 +180,14 @@ function LineStat({ value, type }: { value?: number | null; type: "added" | "del
   return <span className={type}>{type === "added" ? "+" : "-"}{Number(value)}</span>;
 }
 
-function CommitBox({ onCommit, onDiscard }: { onCommit: (message: string) => void; onDiscard: () => void }) {
+function CommitBox({ onCommit }: { onCommit: (message: string) => void }) {
   const message = useUiStore((state) => state.commitMessage);
   const setMessage = useUiStore((state) => state.setCommitMessage);
   const running = useUiStore((state) => state.commitRunning);
   const discardRunning = useUiStore((state) => state.discardRunning);
-  const confirmingDiscard = useUiStore((state) => state.gitDiscardConfirming);
   const setConfirmingDiscard = useUiStore((state) => state.setGitDiscardConfirming);
   const files = useUiStore((state) => state.gitChanges?.files || EMPTY_GIT_FILES);
   const selection = useUiStore((state) => state.gitSelection);
-  const selectedCount = selectedGitFileCount(files, selection);
   const commitDisabled = gitReviewActionDisabled(files, selection, running);
   const discardDisabled = gitReviewActionDisabled(files, selection, running || discardRunning);
   return (
@@ -203,54 +200,8 @@ function CommitBox({ onCommit, onDiscard }: { onCommit: (message: string) => voi
         <button type="submit" disabled={commitDisabled}><Icon icon={running ? "mdi:progress-clock" : "mdi:source-commit"} /><span>{running ? "Pushing..." : "Commit & Push"}</span></button>
         <button type="button" className="danger" disabled={discardDisabled} onClick={() => setConfirmingDiscard(true)}><Icon icon="mdi:trash-can-outline" /><span>Discard selected</span></button>
       </div>
-      {confirmingDiscard && selectedCount ? (
-        <DiscardConfirmModal
-          count={selectedCount}
-          running={discardRunning}
-          onCancel={() => setConfirmingDiscard(false)}
-          onDiscard={onDiscard}
-        />
-      ) : null}
       <GitOperationResult />
     </form>
-  );
-}
-
-function DiscardConfirmModal({
-  count,
-  running,
-  onCancel,
-  onDiscard,
-}: {
-  count: number;
-  running: boolean;
-  onCancel: () => void;
-  onDiscard: () => void;
-}) {
-  return (
-    <div className="modal-backdrop discard-confirm-backdrop" role="presentation">
-      <button
-        className="modal-scrim"
-        type="button"
-        onClick={running ? undefined : onCancel}
-        aria-label="Cancel discard"
-      />
-      <section className="modal discard-confirm-modal" role="dialog" aria-modal="true" aria-labelledby="discard-confirm-title">
-        <header className="modal-header">
-          <h2 id="discard-confirm-title">Discard selected changes?</h2>
-          <button className="icon-button" type="button" onClick={onCancel} disabled={running} aria-label="Cancel discard"><Icon icon="mdi:close" /></button>
-        </header>
-        <div className="discard-confirm-body">
-          <p className="discard-confirm-copy">
-            This will discard {count} selected {count === 1 ? "file" : "files"}. Tracked files will be restored and untracked files will be removed.
-          </p>
-          <div className="discard-confirm-actions">
-            <button type="button" className="ghost" disabled={running} onClick={onCancel}>Cancel</button>
-            <button type="button" className="danger" disabled={running} onClick={onDiscard}><Icon icon={running ? "mdi:progress-clock" : "mdi:trash-can-outline"} /><span>{running ? "Discarding..." : "Confirm discard"}</span></button>
-          </div>
-        </div>
-      </section>
-    </div>
   );
 }
 

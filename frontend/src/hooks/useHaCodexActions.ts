@@ -239,6 +239,7 @@ export function useHaCodexActions(api: HaCodexApi) {
 
     const createSession = async () => {
       const optimisticId = localSessionId();
+      if (chat().showArchived) chat().setShowArchived(false);
       const optimisticSession: CodexSession = {
         id: optimisticId,
         title: "New chat",
@@ -247,8 +248,8 @@ export function useHaCodexActions(api: HaCodexApi) {
         codex_session_id: null,
         status: "idle",
         validation: null,
-        archived: chat().showArchived,
-        archived_at: chat().showArchived ? Date.now() / 1000 : null,
+        archived: false,
+        archived_at: null,
         created_at: Date.now() / 1000,
         updated_at: Date.now() / 1000,
         metadata: { optimistic: true },
@@ -648,9 +649,12 @@ export function useHaCodexActions(api: HaCodexApi) {
           ui().setGitSetupResult(result);
           if (result.status) ui().setGitSetupStatus(result.status);
           if (!result.ok) throw new Error(gitSetupResultMessage(result, "Git pull failed"));
-          ui().showToast("Git pull completed", "success");
+          const alreadyUpToDate = result.step === "up_to_date";
+          ui().showToast(alreadyUpToDate ? "Git is already up to date" : "Git pull completed", "success");
           await loadGitCount();
-          await promptRestartHomeAssistant("Git pull completed. Restart Home Assistant Core now?");
+          if (!alreadyUpToDate) {
+            await promptRestartHomeAssistant("Git pull completed. Restart Home Assistant Core now?");
+          }
         } finally {
           ui().setGitSetupActionRunning(false);
         }

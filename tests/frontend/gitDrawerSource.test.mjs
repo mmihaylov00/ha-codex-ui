@@ -2,14 +2,14 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const sourcePath = new URL("../../frontend/src/components/GitDrawer.tsx", import.meta.url);
+const appSourcePath = new URL("../../frontend/src/App.tsx", import.meta.url);
+const gitDrawerSourcePath = new URL("../../frontend/src/components/GitDrawer.tsx", import.meta.url);
 
-test("discard confirmation uses the modal dialog pattern", async () => {
-  const source = await readFile(sourcePath, "utf8");
+test("discard confirmation is mounted at the app shell level", async () => {
+  const appSource = await readFile(appSourcePath, "utf8");
+  const gitDrawerSource = await readFile(gitDrawerSourcePath, "utf8");
 
-  assert.match(source, /className="modal-backdrop discard-confirm-backdrop"/);
-  assert.match(source, /role="dialog"/);
-  assert.match(source, /aria-modal="true"/);
-  assert.match(source, /aria-labelledby="discard-confirm-title"/);
-  assert.doesNotMatch(source, /className="discard-confirm"/);
+  assert.match(appSource, /<DiscardConfirmModal\b/);
+  assert.doesNotMatch(gitDrawerSource, /<DiscardConfirmModal\b/);
+  assert.doesNotMatch(gitDrawerSource, /className="modal-backdrop discard-confirm-backdrop"/);
 });

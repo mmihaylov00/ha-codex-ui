@@ -1199,6 +1199,16 @@ class CodexManager(
                             and not event.text
                         ):
                             continue
+                        if (
+                            event.kind == "run_finished"
+                            and event.text
+                            and assistant_message is not None
+                            and self._same_message_content(assistant_message.content, event.text)
+                        ):
+                            assistant_message = None
+                            session.touch()
+                            self._fire_session_updated(session)
+                            continue
                         action_message = self._message_for_event(event)
                         if action_message:
                             assistant_message = None
@@ -1723,6 +1733,10 @@ class CodexManager(
                 session.messages.pop(index)
                 session.messages.append(message)
                 return
+
+    def _same_message_content(self, left: str, right: str) -> bool:
+        """Compare rendered message content while tolerating surrounding whitespace."""
+        return left.strip() == right.strip()
 
     async def _async_usage_status(self) -> dict[str, Any]:
         """Return Codex usage percentages when the runtime exposes them."""

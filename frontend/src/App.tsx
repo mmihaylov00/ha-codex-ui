@@ -11,9 +11,10 @@ import { ChatPanel } from "./components/ChatPanel";
 import { GitDrawer } from "./components/GitDrawer";
 import { SettingsModal } from "./components/SettingsModal";
 import { ToastStack } from "./components/ToastStack";
+import { DiscardConfirmModal } from "./components/DiscardConfirmModal";
 import { copyText, errorSummary } from "./utils/format";
 import { useSidebarBadge } from "./hooks/useSidebarBadge";
-import { isGitSetupReady } from "./features/git/gitUtils";
+import { isGitSetupReady, selectedGitFileCount } from "./features/git/gitUtils";
 
 const queryClient = new QueryClient();
 const INITIAL_TRANSCRIPT_LIMIT = 200;
@@ -32,12 +33,16 @@ function CodexApp({ hass, panel }: { hass: HomeAssistant | null; panel: PanelInf
   const actionsRef = useRef(actions);
   const gitOpen = useUiStore((state) => state.gitPanelOpen);
   const gitReady = useUiStore((state) => isGitSetupReady(state.gitSetupStatus));
+  const confirmingDiscard = useUiStore((state) => state.gitDiscardConfirming);
+  const discardRunning = useUiStore((state) => state.discardRunning);
+  const discardSelectedCount = useUiStore((state) => selectedGitFileCount(state.gitChanges?.files || [], state.gitSelection));
   const showDebug = useUiStore((state) => state.showStatusDebug);
   const setShowArchived = useChatStore((state) => state.setShowArchived);
   const showArchived = useChatStore((state) => state.showArchived);
   const setActiveId = useChatStore((state) => state.setActiveId);
   const activeId = useChatStore((state) => state.activeId);
   const setGitPanelOpen = useUiStore((state) => state.setGitPanelOpen);
+  const setGitDiscardConfirming = useUiStore((state) => state.setGitDiscardConfirming);
   const setShowStatusDebug = useUiStore((state) => state.setShowStatusDebug);
   const setSettingsTab = useUiStore((state) => state.setSettingsTab);
   const showToast = useUiStore((state) => state.showToast);
@@ -154,6 +159,13 @@ function CodexApp({ hass, panel }: { hass: HomeAssistant | null; panel: PanelInf
           onLoadMore={actions.showMoreGitFiles}
           onToggleFile={guarded(actions.toggleGitFileDiff)}
           onCommit={guarded(actions.commitAndPush)}
+        />
+      ) : null}
+      {confirmingDiscard && discardSelectedCount ? (
+        <DiscardConfirmModal
+          count={discardSelectedCount}
+          running={discardRunning}
+          onCancel={() => setGitDiscardConfirming(false)}
           onDiscard={guarded(actions.discardSelectedGitFiles)}
         />
       ) : null}

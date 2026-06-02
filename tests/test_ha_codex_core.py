@@ -1689,6 +1689,35 @@ class SessionRunTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(appended_events[-1]["message"]["id"], 2)
         self.assertNotIn("messages", run_finished_events[-1]["session"])
 
+    async def test_run_finished_text_matching_streamed_assistant_is_not_duplicated(self):
+        manager = CodexManager(
+            _FakeHass("/tmp"),
+            store=None,
+            workspace_path="/homeassistant",
+            codex_command="codex",
+            bridge_url=None,
+            addon_write_scope=None,
+            validation_command=None,
+        )
+        manager.runner = _FakeRunner(
+            [
+                NormalizedEvent("message_delta", text="Created hello_world.txt"),
+                NormalizedEvent("run_finished", text="Created hello_world.txt"),
+            ]
+        )
+        manager.async_save = _async_noop
+        manager.async_validate = _async_noop
+        manager._maybe_request_restart_approval = _async_noop
+        session = CodexSession(id="session-1", status="running")
+        manager.sessions[session.id] = session
+
+        await manager._async_run_session(session.id, "prompt")
+
+        self.assertEqual(
+            [(message.role, message.content) for message in session.messages],
+            [("assistant", "Created hello_world.txt")],
+        )
+
     async def test_empty_error_event_records_fallback_message(self):
         manager = CodexManager(
             _FakeHass("/tmp"),
@@ -2607,6 +2636,20 @@ class GitOperationsHelperTests(unittest.IsolatedAsyncioTestCase):
             result = await manager.async_git_setup_pull()
             self.assertTrue(result["ok"])
             self.assertEqual(result["step"], "checkout")
+
+            manager.status.update({"branch": "main"})
+            manager.command_results = [
+                _cmd(ok=True),
+                _cmd(ok=True),
+                _cmd(ok=True, stdout="0\n"),
+            ]
+            result = await manager.async_git_setup_pull()
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["step"], "up_to_date")
+            self.assertFalse(
+                any("pull" in command for command in manager.commands[-3:]),
+                manager.commands[-3:],
+            )
 
             manager.command_results = [
                 _cmd(ok=True),

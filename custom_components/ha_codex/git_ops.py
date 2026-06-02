@@ -373,6 +373,26 @@ class GitOperationsMixin:
                 "status": await self.async_git_setup_status(),
             }
 
+        incoming_result = await self._run_command(
+            self._git_command(["rev-list", "--count", f"HEAD..origin/{branch}"]),
+            cwd=None,
+            timeout=20,
+        )
+        if incoming_result["ok"]:
+            results.append(incoming_result)
+            try:
+                incoming_count = int((incoming_result["stdout"] or "").strip() or "0")
+            except ValueError:
+                incoming_count = 0
+            if incoming_count == 0:
+                return {
+                    "ok": True,
+                    "step": "up_to_date",
+                    "stdout": "Already up to date.",
+                    "results": results,
+                    "status": await self.async_git_setup_status(),
+                }
+
         pull_result = await self._run_command(
             self._git_command(["pull", "--ff-only", "origin", branch]),
             cwd=None,

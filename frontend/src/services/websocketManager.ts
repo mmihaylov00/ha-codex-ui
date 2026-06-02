@@ -2,6 +2,7 @@ import type { HaCodexEvent, HomeAssistant, PanelInfo } from "../types/ha";
 import { useChatStore } from "../stores/chatStore";
 import { useUiStore } from "../stores/uiStore";
 import { HA_CODEX_EVENTS } from "./events";
+import { shouldKeepResolvedSubscription } from "./subscriptionState";
 
 type Unsubscribe = () => void;
 type PendingDelta = { chatId: string; messageId?: string | number; delta: string };
@@ -15,6 +16,7 @@ export class HaCodexWebSocketManager {
   private reconnectTimer: number | null = null;
   private deltaFrame: number | null = null;
   private pendingDeltas = new Map<string, PendingDelta>();
+  private subscriptionGeneration = 0;
 
   configure(hass: HomeAssistant | null, panel: PanelInfo | null) {
     this.hass = hass;
@@ -28,11 +30,17 @@ export class HaCodexWebSocketManager {
     const eventTypes = Object.values(events).filter(Boolean);
     if (!eventTypes.length) return;
     this.subscribed = true;
+    const subscriptionGeneration = ++this.subscriptionGeneration;
     eventTypes.forEach((eventType) => {
       try {
         const result = this.hass?.connection?.subscribeEvents((event) => this.handleEvent(event), eventType);
         Promise.resolve(result).then((unsubscribe) => {
-          if (typeof unsubscribe === "function") this.unsubscribers.push(unsubscribe);
+          if (typeof unsubscribe !== "function") return;
+          if (shouldKeepResolvedSubscription(this.subscriptionGeneration, subscriptionGeneration, this.subscribed)) {
+            this.unsubscribers.push(unsubscribe);
+          } else {
+            unsubscribe();
+          }
         });
       } catch (error) {
         this.subscribed = false;
@@ -46,6 +54,7 @@ export class HaCodexWebSocketManager {
     this.unsubscribers.forEach((unsubscribe) => unsubscribe());
     this.unsubscribers = [];
     this.subscribed = false;
+    this.subscriptionGeneration += 1;
     if (this.reconnectTimer) {
       window.clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;

@@ -11,3 +11,11 @@ export function shouldReplaceSubscriptions(
 ): boolean {
   return subscribed && (currentConnection !== nextConnection || currentEventKey !== nextEventKey);
 }
+
+export function shouldKeepResolvedSubscription(
+  currentGeneration: number,
+  subscriptionGeneration: number,
+  subscribed: boolean,
+): boolean {
+  return subscribed && currentGeneration === subscriptionGeneration;
+}
