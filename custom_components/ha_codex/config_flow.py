@@ -132,7 +132,7 @@ class HaCodexConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> Any:
         """Create the integration entry from the UI."""
-        await self._async_set_unique_id(DOMAIN)
+        await _async_set_unique_id(self)
         self._abort_if_unique_id_configured()
         if user_input is not None:
             return self.async_create_entry(
@@ -143,7 +143,7 @@ class HaCodexConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_import(self, user_input: dict[str, Any]) -> Any:
         """Import YAML configuration into a config entry."""
-        await self._async_set_unique_id(DOMAIN)
+        await _async_set_unique_id(self)
         self._abort_if_unique_id_configured()
         return self.async_create_entry(
             title=TITLE,
@@ -190,6 +190,17 @@ def _normalize_bool(value: Any) -> bool:
     if isinstance(value, str):
         return value.strip().lower() not in {"0", "false", "no", "off"}
     return bool(value)
+
+
+async def _async_set_unique_id(flow: Any) -> None:
+    setter = getattr(flow, "async_set_unique_id", None)
+    if setter is None:
+        setter = getattr(flow, "_async_set_unique_id", None)
+    if setter is None:
+        return
+    result = setter(DOMAIN)
+    if hasattr(result, "__await__"):
+        await result
 
 
 def _form_values(config: dict[str, Any]) -> dict[str, Any]:
