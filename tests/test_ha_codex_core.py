@@ -30,7 +30,7 @@ from custom_components.ha_codex.validation_lab import (
     reload_service_for_domain,
 )
 
-CONFIG_TEMP_DIR = "/config" if Path("/config").is_dir() else None
+CONFIG_TEMP_DIR = None
 REPO_ROOT = Path(__file__).resolve().parents[1]
 BRIDGE_PATH = REPO_ROOT / "custom_components" / "ha_codex" / "bridge" / "ha_codex_bridge.py"
 
