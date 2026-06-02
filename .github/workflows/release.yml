@@ -29,7 +29,18 @@ jobs:
         run: npm run build --prefix frontend
 
       - name: Set manifest version
-        run: python -c 'import json, os; from pathlib import Path; p = Path("custom_components/ha_codex/manifest.json"); data = json.loads(p.read_text(encoding="utf-8")); data["version"] = os.environ["RELEASE_VERSION"]; p.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")'
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          path = Path("custom_components/ha_codex/manifest.json")
+          data = json.loads(path.read_text(encoding="utf-8"))
+          tag = os.environ["RELEASE_VERSION"]
+          data["version"] = tag[1:] if tag.startswith("v") else tag
+          path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+          PY
         env:
           RELEASE_VERSION: ${{ github.event.release.tag_name }}
 
