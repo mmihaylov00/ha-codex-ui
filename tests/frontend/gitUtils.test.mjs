@@ -87,6 +87,11 @@ test("git setup summary treats missing status as checking while loading", () => 
     title: "Checking Git setup...",
     detail: "Loading setup status...",
   });
+  assert.deepEqual(gitSetupSummary({ setup_complete: false, missing: ["setup status"], repo_error: "connection lost" }, false), {
+    tone: "checking",
+    title: "Checking Git setup...",
+    detail: "connection lost",
+  });
   assert.deepEqual(gitSetupSummary({ setup_complete: false, missing: ["remote"] }, false), {
     tone: "warning",
     title: "Git setup incomplete",

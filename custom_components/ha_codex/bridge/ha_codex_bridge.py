@@ -10,6 +10,7 @@ import subprocess
 import sys
 import threading
 import time
+import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -31,7 +32,11 @@ CONFIG_DIR = discover_config_dir()
 sys.path.insert(0, str(CONFIG_DIR))
 
 from custom_components.ha_codex.codex_events import compact_raw_event, normalize_event
-from custom_components.ha_codex.runner import RunnerOptions, build_codex_command
+from custom_components.ha_codex.runner import (
+    RunnerOptions,
+    build_codex_command,
+    with_question_guidance,
+)
 
 APPROVALS: dict[str, bool] = {}
 APPROVAL_CONDITION = threading.Condition()
@@ -59,6 +64,33 @@ DEVICE_LOGIN_INITIAL_WAIT_SECONDS = 3
 ANSI_ESCAPE_RE = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
 DEVICE_CODE_RE = re.compile(r"\b[A-Z0-9]{4,8}(?:-[A-Z0-9]{4,8}){1,3}\b")
 DEVICE_URL_RE = re.compile(r"https?://[^\s)>\]\"']+")
+SDK_TURN_COMPLETED_METHOD = "turn/completed"
+SDK_SANDBOX_MODES = {
+    "read-only": "read_only",
+    "read_only": "read_only",
+    "workspace-write": "workspace_write",
+    "workspace_write": "workspace_write",
+    "danger-full-access": "full_access",
+    "danger_full_access": "full_access",
+    "full-access": "full_access",
+    "full_access": "full_access",
+}
+SDK_SANDBOX_WIRE_MODES = {
+    "read_only": "read-only",
+    "workspace_write": "workspace-write",
+    "full_access": "danger-full-access",
+}
+SDK_SANDBOX_POLICIES = {
+    "read_only": {"type": "readOnly", "networkAccess": False},
+    "workspace_write": {
+        "type": "workspaceWrite",
+        "networkAccess": False,
+        "excludeSlashTmp": False,
+        "excludeTmpdirEnvVar": False,
+        "writableRoots": [],
+    },
+    "full_access": {"type": "dangerFullAccess"},
+}
 
 
 def bridge_log(message: str) -> None:
@@ -66,6 +98,226 @@ def bridge_log(message: str) -> None:
     timestamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     with LOG_FILE.open("a", encoding="utf-8") as log_file:
         log_file.write(f"{timestamp} {message}\n")
+
+
+def codex_child_env() -> dict[str, str]:
+    """Return environment for child Codex runtimes."""
+    env = os.environ.copy()
+    env["CODEX_HOME"] = str(CODEX_HOME)
+    system_path = f"{CONFIG_DIR}/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+    current_path = env.get("PATH", "")
+    env["PATH"] = f"{system_path}:{current_path}" if current_path else system_path
+    return env
+
+
+def build_sdk_run_request(payload: dict[str, Any]) -> dict[str, Any]:
+    """Normalize a bridge run payload into SDK runtime settings."""
+    run_settings = (
+        payload.get("run_settings") if isinstance(payload.get("run_settings"), dict) else {}
+    )
+    sandbox = SDK_SANDBOX_MODES.get(str(payload.get("sandbox") or "workspace-write"))
+    sandbox = sandbox or "workspace_write"
+    sandbox_policy = dict(SDK_SANDBOX_POLICIES[sandbox])
+    if sandbox == "workspace_write":
+        sandbox_policy["writableRoots"] = [
+            str(path) for path in payload.get("writable_paths", []) if str(path).strip()
+        ]
+    approval_policy = str(payload.get("approval_policy") or "on-request")
+    codex_command = str(payload.get("codex_command") or "").strip() or None
+    reasoning_effort = str(run_settings.get("reasoning_effort") or "").strip()
+    if reasoning_effort == "auto":
+        reasoning_effort = ""
+    return {
+        "prompt": with_question_guidance(str(payload.get("prompt", ""))),
+        "thread_id": str(payload.get("codex_session_id") or "").strip() or None,
+        "codex_bin": codex_command,
+        "cwd": str(payload.get("workspace_path") or CONFIG_DIR),
+        "sandbox": sandbox,
+        "sdk_sandbox_mode": SDK_SANDBOX_WIRE_MODES[sandbox],
+        "sdk_sandbox_policy": sandbox_policy,
+        "approval_mode": "deny_all" if approval_policy == "never" else "auto_review",
+        "approval_policy": "never" if approval_policy == "never" else "on-request",
+        "approvals_reviewer": None if approval_policy == "never" else "auto_review",
+        "model": str(run_settings.get("model") or "").strip() or None,
+        "effort": reasoning_effort or None,
+    }
+
+
+def build_sdk_approval_handler(wait_for_approval: Any) -> Any:
+    """Return a Codex SDK approval callback backed by bridge approval decisions."""
+
+    def handle_approval(method: str, params: dict[str, Any] | None) -> dict[str, str]:
+        if method not in {
+            "item/commandExecution/requestApproval",
+            "item/fileChange/requestApproval",
+        }:
+            return {}
+        payload = params if isinstance(params, dict) else {}
+        approval = {
+            "id": f"sdk-{uuid.uuid4()}",
+            "method": method,
+            "command": _sdk_command(payload),
+            "cwd": _sdk_cwd(payload),
+            "params": payload,
+        }
+        return {"decision": "accept" if wait_for_approval(approval) else "deny"}
+
+    return handle_approval
+
+
+def run_codex_sdk(
+    payload: dict[str, Any],
+    *,
+    wait_for_approval: Any,
+) -> Any:
+    """Run one Codex turn through the Python SDK and yield Codex JSONL-like events."""
+    from openai_codex.client import CodexClient, CodexConfig
+
+    request = build_sdk_run_request(payload)
+    config = CodexConfig(
+        codex_bin=request["codex_bin"],
+        cwd=request["cwd"],
+        env=codex_child_env(),
+        config_overrides=("shell_environment_policy.inherit=all",),
+    )
+    client = CodexClient(
+        config=config,
+        approval_handler=build_sdk_approval_handler(wait_for_approval),
+    )
+    turn_id = None
+    try:
+        client.start()
+        client.initialize()
+        thread_params = _sdk_thread_params(request)
+        if request["thread_id"]:
+            thread = client.thread_resume(request["thread_id"], thread_params).thread
+        else:
+            thread = client.thread_start(thread_params).thread
+        thread_id = _object_value(thread, "id") or request["thread_id"]
+        if thread_id:
+            yield {"type": "thread.started", "thread_id": thread_id}
+
+        turn = client.turn_start(thread_id, request["prompt"], _sdk_turn_params(request)).turn
+        turn_id = _object_value(turn, "id")
+        while True:
+            notification = client.next_turn_notification(turn_id)
+            if str(getattr(notification, "method", "")) == SDK_TURN_COMPLETED_METHOD:
+                break
+            event = sdk_notification_to_codex_event(notification)
+            if event:
+                yield event
+    finally:
+        if turn_id:
+            try:
+                client.unregister_turn_notifications(turn_id)
+            except (AttributeError, RuntimeError):
+                pass
+        client.close()
+
+
+def sdk_notification_to_codex_event(notification: Any) -> dict[str, Any] | None:
+    """Convert one SDK notification into the JSONL shape consumed by existing normalizers."""
+    method = str(getattr(notification, "method", "") or "")
+    payload = _sdk_payload_dict(getattr(notification, "payload", None))
+    if method == "item/agentMessage/delta":
+        return {"type": "agent_message_delta", "delta": str(payload.get("delta") or "")}
+    if method == "item/completed":
+        return {"type": "item.completed", **payload}
+    if method == "turn/diff/updated":
+        return {"type": "turn.diff.updated", **payload}
+    if not method:
+        return None
+    return {"type": method.replace("/", "."), **payload}
+
+
+def _sdk_thread_params(request: dict[str, Any]) -> dict[str, Any]:
+    params = {
+        "cwd": request["cwd"],
+        "approvalPolicy": request["approval_policy"],
+        "sandbox": request["sdk_sandbox_mode"],
+    }
+    if request["approvals_reviewer"]:
+        params["approvalsReviewer"] = request["approvals_reviewer"]
+    if request["model"]:
+        params["model"] = request["model"]
+    return params
+
+
+def _sdk_turn_params(request: dict[str, Any]) -> dict[str, Any]:
+    params = {
+        "cwd": request["cwd"],
+        "approvalPolicy": request["approval_policy"],
+        "sandboxPolicy": request["sdk_sandbox_policy"],
+    }
+    if request["approvals_reviewer"]:
+        params["approvalsReviewer"] = request["approvals_reviewer"]
+    if request["model"]:
+        params["model"] = request["model"]
+    if request["effort"]:
+        params["effort"] = request["effort"]
+    return params
+
+
+def _sdk_payload_dict(payload: Any) -> dict[str, Any]:
+    if payload is None:
+        return {}
+    if hasattr(payload, "model_dump"):
+        data = payload.model_dump(by_alias=True, exclude_none=True, mode="json")
+        return data if isinstance(data, dict) else {}
+    if isinstance(payload, dict):
+        return payload
+    values = getattr(payload, "__dict__", {})
+    return dict(values) if isinstance(values, dict) else {}
+
+
+def _object_value(obj: Any, key: str) -> str | None:
+    if isinstance(obj, dict):
+        value = obj.get(key)
+    else:
+        value = getattr(obj, key, None)
+    return str(value) if value else None
+
+
+def _sdk_command(payload: dict[str, Any]) -> str | None:
+    command = payload.get("command") or payload.get("cmd")
+    if isinstance(command, list):
+        return " ".join(str(part) for part in command)
+    if isinstance(command, str):
+        return command
+    return None
+
+
+def _sdk_cwd(payload: dict[str, Any]) -> str | None:
+    cwd = payload.get("cwd") or payload.get("workdir")
+    return str(cwd) if cwd else None
+
+
+def should_force_cli(payload: dict[str, Any]) -> bool:
+    """Return true when the bridge payload explicitly asks for legacy CLI mode."""
+    run_settings = (
+        payload.get("run_settings") if isinstance(payload.get("run_settings"), dict) else {}
+    )
+    return str(payload.get("runtime") or run_settings.get("bridge_runtime") or "").strip() == "cli"
+
+
+def bundled_codex_command() -> str | None:
+    """Return the SDK-bundled Codex binary path when installed."""
+    try:
+        from codex_cli_bin import bundled_codex_path
+    except ImportError:
+        return None
+    try:
+        return str(bundled_codex_path())
+    except (OSError, TypeError, ValueError):
+        return None
+
+
+def resolve_codex_command(codex_command: str | None = None) -> str:
+    """Return the configured, bundled, or legacy Codex command path."""
+    configured = str(codex_command or "").strip()
+    if configured:
+        return configured
+    return bundled_codex_command() or str(CONFIG_DIR / "bin" / "codex")
 
 
 class BridgeHandler(BaseHTTPRequestHandler):
@@ -129,8 +381,34 @@ class BridgeHandler(BaseHTTPRequestHandler):
     def handle_run(self) -> None:
         """Run Codex and stream JSONL output."""
         payload = self.read_json()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/x-ndjson")
+        self.end_headers()
+        if should_force_cli(payload):
+            self.handle_run_cli(payload)
+            return
+
+        emitted_sdk_event = False
+        try:
+            bridge_log("starting SDK run")
+            for event in run_codex_sdk(payload, wait_for_approval=self.wait_for_sdk_approval):
+                emitted_sdk_event = True
+                self.write_jsonl(event)
+            bridge_log("SDK run finished")
+            return
+        except Exception as err:  # noqa: BLE001 - SDK startup errors should fall back to CLI.
+            bridge_log(f"SDK run unavailable error={err!r}")
+            if emitted_sdk_event:
+                self.write_jsonl({"type": "error", "message": str(err)})
+                return
+
+        self.handle_run_cli(payload)
+
+    def handle_run_cli(self, payload: dict[str, Any]) -> None:
+        """Run Codex through the legacy CLI JSONL path."""
+        codex_command = resolve_codex_command(str(payload.get("codex_command") or ""))
         options = RunnerOptions(
-            codex_command=str(payload.get("codex_command", "codex")),
+            codex_command=codex_command,
             workspace_path=str(payload.get("workspace_path", "/homeassistant")),
             writable_paths=[str(path) for path in payload.get("writable_paths", [])],
             sandbox=str(payload.get("sandbox", "workspace-write")),
@@ -157,9 +435,6 @@ class BridgeHandler(BaseHTTPRequestHandler):
         )
         stderr_lines: list[str] = []
         stderr_thread = self.start_stderr_reader(process, stderr_lines)
-        self.send_response(200)
-        self.send_header("Content-Type", "application/x-ndjson")
-        self.end_headers()
         client_connected = True
         try:
             assert process.stdout is not None
@@ -205,6 +480,18 @@ class BridgeHandler(BaseHTTPRequestHandler):
                 bridge_log(f"killing unfinished pid={process.pid}")
                 process.kill()
                 process.wait()
+
+    def wait_for_sdk_approval(self, approval: dict[str, Any]) -> bool:
+        """Emit an SDK approval request to the bridge client and wait for a decision."""
+        self.write_jsonl(
+            {
+                "type": "exec_approval_request",
+                "id": approval.get("id"),
+                "command": approval.get("command"),
+                "cwd": approval.get("cwd"),
+            }
+        )
+        return self.wait_for_approval(str(approval.get("id") or ""))
 
     def start_stderr_reader(
         self,
@@ -351,14 +638,7 @@ class BridgeHandler(BaseHTTPRequestHandler):
 
     def codex_env(self) -> dict[str, str]:
         """Return environment for child Codex runs."""
-        env = os.environ.copy()
-        env["CODEX_HOME"] = str(CODEX_HOME)
-        system_path = (
-            f"{CONFIG_DIR}/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-        )
-        current_path = env.get("PATH", "")
-        env["PATH"] = f"{system_path}:{current_path}" if current_path else system_path
-        return env
+        return codex_child_env()
 
     def log_message(self, format: str, *args: Any) -> None:
         """Use the default server logger format."""
@@ -466,7 +746,7 @@ def codex_login_status_text(
     codex_env: dict[str, str] | None = None,
 ) -> str | None:
     """Return safe Codex login status text from the CLI."""
-    command = [codex_command or str(CONFIG_DIR / "bin" / "codex"), "login", "status"]
+    command = [resolve_codex_command(codex_command), "login", "status"]
     try:
         result = subprocess.run(
             command,
@@ -490,7 +770,7 @@ def start_device_login(
     codex_env: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Start Codex device-code login if one is not already running."""
-    command = [codex_command or str(CONFIG_DIR / "bin" / "codex"), "login", "--device-auth"]
+    command = [resolve_codex_command(codex_command), "login", "--device-auth"]
     with DEVICE_LOGIN_CONDITION:
         process = DEVICE_LOGIN.get("process")
         if DEVICE_LOGIN.get("active") and process is not None and process.poll() is None:
@@ -696,7 +976,7 @@ def logout_codex(
     codex_env: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Run Codex logout and return refreshed account status."""
-    command = [codex_command or str(CONFIG_DIR / "bin" / "codex"), "logout"]
+    command = [resolve_codex_command(codex_command), "logout"]
     try:
         result = subprocess.run(
             command,

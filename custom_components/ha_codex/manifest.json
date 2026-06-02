@@ -8,5 +8,6 @@
   "integration_type": "service",
   "iot_class": "local_push",
   "issue_tracker": "https://github.com/mmihaylov00/ha-codex-ui/issues",
+  "requirements": ["openai-codex==0.1.0b2"],
   "version": "0.0.0"
 }

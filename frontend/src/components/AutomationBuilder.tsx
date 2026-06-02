@@ -74,7 +74,7 @@ export function AutomationBuilder({ open, hass, contextItems, onClose, onSubmit 
   return (
     <div className="modal-backdrop builder-modal-backdrop" role="presentation">
       <button className="modal-scrim" type="button" onClick={onClose} aria-label="Close builder" />
-      <section className={`modal builder-modal ${isCreateAutomation ? "builder-modal-simple" : ""}`} role="dialog" aria-modal="true" aria-label="Automation and script builder">
+      <section className="modal builder-modal" role="dialog" aria-modal="true" aria-label="Automation and script builder">
         <header className="modal-header">
           <h2>Automation builder</h2>
           <button className="icon-button" type="button" onClick={onClose} title="Close" aria-label="Close builder"><Icon icon="mdi:close" /></button>
@@ -464,7 +464,7 @@ function EntitySearchField({ label, placeholder, options, selector, value, onCha
       const nextValues = [...selectedValues, entityId];
       onChange(nextValues.join(", "));
       setQuery("");
-      setOpen(false);
+      setOpen(true);
       return;
     }
     onChange(entityId);
@@ -611,9 +611,13 @@ function EntitySearchResults({ options, onSelect }: { options: EntityOption[]; o
   return (
     <div className="entity-combobox-menu" role="listbox">
       {options.length ? options.map((option) => (
-        <button key={option.entityId} type="button" role="option" onMouseDown={(event) => event.preventDefault()} onClick={() => onSelect(option.entityId)}>
-          <strong>{option.label}</strong>
-          <small>{option.subtitle}</small>
+        <button className="entity-combobox-option" key={option.entityId} type="button" role="option" onMouseDown={(event) => event.preventDefault()} onClick={() => onSelect(option.entityId)}>
+          <Icon className="entity-combobox-option-icon" icon={entityResultIcon(option.entityId)} />
+          <span className="entity-combobox-option-main">
+            <strong>{option.label}</strong>
+            {option.subtitle ? <small>{option.subtitle}</small> : null}
+          </span>
+          <span className="entity-combobox-option-badge">{entityDomain(option.entityId)}</span>
         </button>
       )) : <div className="entity-combobox-empty">No matches</div>}
     </div>
@@ -625,7 +629,7 @@ function buildEntityOptions(states: Record<string, HassEntity>): EntityOption[] 
     .map(([entityId, state]) => {
       const friendlyName = String(state.attributes?.friendly_name || entityId);
       const domain = entityDomain(entityId);
-      const subtitle = friendlyName === entityId ? domain : `${entityId} - ${domain}`;
+      const subtitle = friendlyName === entityId ? "" : entityId;
       return {
         entityId,
         label: friendlyName,
@@ -657,6 +661,40 @@ function splitEntityValues(value: string): string[] {
 
 function entityDomain(entityId: string): string {
   return entityId.split(".")[0] || "";
+}
+
+function entityResultIcon(entityId: string): string {
+  switch (entityDomain(entityId)) {
+    case "automation":
+      return "mdi:robot-industrial-outline";
+    case "binary_sensor":
+      return "mdi:checkbox-marked-circle-outline";
+    case "button":
+    case "input_button":
+      return "mdi:gesture-tap-button";
+    case "climate":
+      return "mdi:thermostat";
+    case "cover":
+      return "mdi:window-shutter";
+    case "fan":
+      return "mdi:fan";
+    case "light":
+      return "mdi:lightbulb-outline";
+    case "lock":
+      return "mdi:lock-outline";
+    case "media_player":
+      return "mdi:play-circle-outline";
+    case "scene":
+      return "mdi:palette-outline";
+    case "script":
+      return "mdi:script-text-outline";
+    case "sensor":
+      return "mdi:gauge";
+    case "switch":
+      return "mdi:toggle-switch-outline";
+    default:
+      return "mdi:home-assistant";
+  }
 }
 
 function formatTrigger(type: string, entityId: string, detail: string): string {

@@ -86,11 +86,11 @@ export function isGitSetupStatusLoadError(status: GitSetupStatus | null | undefi
 }
 
 export function gitSetupSummary(status: GitSetupStatus | null | undefined, loading = false): { tone: "checking" | "success" | "warning"; title: string; detail: string } {
-  if (!status || loading) {
+  if (!status || loading || isGitSetupStatusLoadError(status)) {
     return {
       tone: "checking",
       title: "Checking Git setup...",
-      detail: "Loading setup status...",
+      detail: status?.repo_error || "Loading setup status...",
     };
   }
   if (isGitSetupReady(status)) {

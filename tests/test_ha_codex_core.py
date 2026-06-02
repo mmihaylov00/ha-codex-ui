@@ -105,12 +105,13 @@ class ConfigEntryTests(unittest.TestCase):
 
         self.assertEqual(manifest["name"], "HA Codex UI")
         self.assertEqual(manifest["config_flow"], True)
+        self.assertIn("openai-codex==0.1.0b2", manifest["requirements"])
 
     def test_config_flow_defaults_match_hacs_install_values(self):
         defaults = config_defaults()
 
         self.assertEqual(defaults["workspace_path"], "/config")
-        self.assertEqual(defaults["codex_command"], "/config/bin/codex")
+        self.assertEqual(defaults["codex_command"], "")
         self.assertEqual(defaults["bridge_url"], "http://127.0.0.1:8765")
         self.assertTrue(defaults["require_admin"])
         self.assertEqual(defaults["addon_write_scope"], "all_visible")
@@ -436,6 +437,107 @@ class BridgeRunnerTests(unittest.IsolatedAsyncioTestCase):
                 await runner._restart_bridge()
         finally:
             bridge_runner.async_restart_bridge_service = original_restart
+
+
+class BridgeSdkRuntimeTests(unittest.TestCase):
+    def test_builds_sdk_run_request_from_bridge_payload(self):
+        bridge = load_bridge_module()
+
+        request = bridge.build_sdk_run_request(
+            {
+                "prompt": "Inspect config",
+                "codex_session_id": "thread-1",
+                "codex_command": "/custom/codex",
+                "workspace_path": "/config",
+                "writable_paths": ["/addons"],
+                "sandbox": "workspace-write",
+                "approval_policy": "never",
+                "run_settings": {
+                    "model": "gpt-5-codex",
+                    "reasoning_effort": "high",
+                },
+            }
+        )
+
+        self.assertEqual(request["codex_bin"], "/custom/codex")
+        self.assertEqual(request["thread_id"], "thread-1")
+        self.assertEqual(request["cwd"], "/config")
+        self.assertEqual(request["sandbox"], "workspace_write")
+        self.assertEqual(request["sdk_sandbox_policy"]["writableRoots"], ["/addons"])
+        self.assertEqual(request["approval_mode"], "deny_all")
+        self.assertEqual(request["model"], "gpt-5-codex")
+        self.assertEqual(request["effort"], "high")
+        self.assertIn("HA Codex question protocol", request["prompt"])
+
+    def test_sdk_notification_to_codex_event_preserves_frontend_event_contract(self):
+        bridge = load_bridge_module()
+        notification = types.SimpleNamespace(
+            method="item/agentMessage/delta",
+            payload=_FakeSdkPayload(delta="hello"),
+        )
+
+        event = bridge.sdk_notification_to_codex_event(notification)
+
+        self.assertEqual(event, {"type": "agent_message_delta", "delta": "hello"})
+
+    def test_sdk_approval_handler_waits_for_bridge_decision(self):
+        bridge = load_bridge_module()
+        approvals = []
+
+        def wait_for_approval(approval):
+            approvals.append(approval)
+            return False
+
+        handler = bridge.build_sdk_approval_handler(wait_for_approval)
+        decision = handler(
+            "item/commandExecution/requestApproval",
+            {"command": ["ha", "core", "restart"], "cwd": "/config"},
+        )
+
+        self.assertEqual(decision, {"decision": "deny"})
+        self.assertEqual(approvals[0]["command"], "ha core restart")
+        self.assertEqual(approvals[0]["cwd"], "/config")
+        self.assertTrue(approvals[0]["id"])
+
+    def test_run_codex_sdk_streams_normalized_events(self):
+        bridge = load_bridge_module()
+        fake_sdk = _install_openai_codex_sdk_stub()
+        fake_sdk.notifications = [
+            types.SimpleNamespace(
+                method="item/agentMessage/delta",
+                payload=_FakeSdkPayload(delta="hello"),
+            ),
+            types.SimpleNamespace(
+                method="turn/completed",
+                payload=_FakeSdkPayload(turn={"id": "turn-1"}),
+            ),
+        ]
+
+        events = list(
+            bridge.run_codex_sdk(
+                {
+                    "prompt": "Prompt",
+                    "workspace_path": "/config",
+                    "run_settings": {"model": "gpt-5-codex"},
+                },
+                wait_for_approval=lambda _approval: True,
+            )
+        )
+
+        self.assertEqual(events[0], {"type": "thread.started", "thread_id": "thread-1"})
+        self.assertEqual(events[1], {"type": "agent_message_delta", "delta": "hello"})
+        self.assertEqual(fake_sdk.clients[0].config.codex_bin, None)
+        self.assertEqual(fake_sdk.clients[0].turn_params["model"], "gpt-5-codex")
+        self.assertEqual(fake_sdk.clients[0].turn_params["cwd"], "/config")
+
+    def test_run_codex_sdk_raises_import_error_when_sdk_missing(self):
+        bridge = load_bridge_module()
+        for name in list(sys.modules):
+            if name.startswith("openai_codex"):
+                sys.modules.pop(name)
+
+        with self.assertRaises(ImportError):
+            list(bridge.run_codex_sdk({"prompt": "Prompt"}, wait_for_approval=lambda _: True))
 
 
 class CodexEventTests(unittest.TestCase):
@@ -3438,6 +3540,32 @@ class ManagerUtilityTests(unittest.IsolatedAsyncioTestCase):
                 manager_module.discover_addon_paths = original_discover_addons
                 manager_module.discover_validation_command = original_discover_validation
 
+            sdk_manager = CodexManager(
+                _FakeHass(root),
+                _MemoryStore(),
+                workspace_path=str(root),
+                codex_command="",
+                bridge_url="http://127.0.0.1:8765",
+                addon_write_scope=None,
+                validation_command=None,
+            )
+            original_bundled = manager_module.bundled_codex_path
+            try:
+                manager_module.bundled_codex_path = lambda: "/sdk/bin/codex"
+
+                async def sdk_small_command(command):
+                    stdout = "codex-cli 0.132.0\n" if "--version" in command else ""
+                    return {"ok": True, "returncode": 0, "stdout": stdout, "stderr": ""}
+
+                sdk_manager._run_small_command = sdk_small_command
+                status = await sdk_manager.async_probe()
+                self.assertEqual(status["runner_type"], "bridge-sdk")
+                self.assertEqual(status["codex_path"], "/sdk/bin/codex")
+                self.assertEqual(status["codex_version"], "codex-cli 0.132.0")
+                self.assertTrue(status["codex_exec_available"])
+            finally:
+                manager_module.bundled_codex_path = original_bundled
+
             log_result = await manager.async_clear_bridge_log()
             self.assertTrue(log_result["exists"])
             self.assertEqual((root / "ha_codex_bridge.log").read_text(encoding="utf-8"), "")
@@ -4617,6 +4745,85 @@ class _FakeRunner:
         self.calls.append(args)
         for event in self.events:
             yield event
+
+
+class _FakeSdkPayload:
+    def __init__(self, **values):
+        self.values = values
+        for key, value in values.items():
+            setattr(self, key, value)
+
+    def model_dump(self, **_kwargs):
+        return dict(self.values)
+
+
+def _install_openai_codex_sdk_stub():
+    sdk = types.SimpleNamespace(clients=[], notifications=[])
+    openai_codex = types.ModuleType("openai_codex")
+    client_module = types.ModuleType("openai_codex.client")
+
+    class FakeCodexConfig:
+        def __init__(
+            self,
+            codex_bin=None,
+            cwd=None,
+            env=None,
+            config_overrides=(),
+            **_kwargs,
+        ):
+            self.codex_bin = codex_bin
+            self.cwd = cwd
+            self.env = env or {}
+            self.config_overrides = config_overrides
+
+    class FakeCodexClient:
+        def __init__(self, config=None, approval_handler=None):
+            self.config = config
+            self.approval_handler = approval_handler
+            self.thread_params = None
+            self.turn_params = None
+            self.closed = False
+            sdk.clients.append(self)
+
+        def start(self):
+            return None
+
+        def initialize(self):
+            return _FakeSdkPayload()
+
+        def close(self):
+            self.closed = True
+
+        def thread_start(self, params):
+            self.thread_params = params
+            return _FakeSdkPayload(thread=_FakeSdkPayload(id="thread-1"))
+
+        def thread_resume(self, thread_id, params):
+            self.thread_params = params
+            return _FakeSdkPayload(thread=_FakeSdkPayload(id=thread_id))
+
+        def turn_start(self, thread_id, input_items, params):
+            self.turn_params = params
+            self.turn_input = input_items
+            return _FakeSdkPayload(turn=_FakeSdkPayload(id="turn-1"))
+
+        def register_turn_notifications(self, turn_id):
+            self.turn_id = turn_id
+
+        def unregister_turn_notifications(self, turn_id):
+            self.unregistered_turn_id = turn_id
+
+        def next_turn_notification(self, _turn_id):
+            if not sdk.notifications:
+                raise RuntimeError("no fake SDK notifications left")
+            return sdk.notifications.pop(0)
+
+    client_module.CodexClient = FakeCodexClient
+    client_module.CodexConfig = FakeCodexConfig
+    openai_codex.client = client_module
+    sys.modules["openai_codex"] = openai_codex
+    sys.modules["openai_codex.client"] = client_module
+    return sdk
 
 
 class _SequencedRunner:

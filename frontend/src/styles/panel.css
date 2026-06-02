@@ -162,6 +162,77 @@
       .ha-codex-root.theme-light .context-row.selected .context-checkbox {
         color: #ffffff;
       }
+      .ha-codex-root.theme-light button {
+        color: #ffffff;
+      }
+      .ha-codex-root.theme-light button.ghost,
+      .ha-codex-root.theme-light .tabs button,
+      .ha-codex-root.theme-light .header-actions button,
+      .ha-codex-root.theme-light .icon-button,
+      .ha-codex-root.theme-light .debug-button,
+      .ha-codex-root.theme-light .archive-toggle,
+      .ha-codex-root.theme-light .git-toggle,
+      .ha-codex-root.theme-light .run-select-button,
+      .ha-codex-root.theme-light .run-select-menu button,
+      .ha-codex-root.theme-light .modal-tabs button,
+      .ha-codex-root.theme-light .context-button,
+      .ha-codex-root.theme-light .builder-button,
+      .ha-codex-root.theme-light .question-choice,
+      .ha-codex-root.theme-light .diff-card,
+      .ha-codex-root.theme-light .git-load-more,
+      .ha-codex-root.theme-light .context-row,
+      .ha-codex-root.theme-light .entity-combobox-menu button {
+        color: var(--tw-text);
+      }
+      .ha-codex-root.theme-light .modal-tabs button {
+        color: var(--tw-muted);
+      }
+      .ha-codex-root.theme-light .run-select-menu button:hover,
+      .ha-codex-root.theme-light .run-select-menu button.selected,
+      .ha-codex-root.theme-light .modal-tabs button.active,
+      .ha-codex-root.theme-light .modal-tabs button.active:hover {
+        background: var(--tw-primary);
+        border-color: var(--tw-primary);
+        color: #ffffff;
+      }
+      .ha-codex-root.theme-light .modal-tabs .bridge-action:not(:disabled):hover,
+      .ha-codex-root.theme-light .modal-tabs .bridge-action-start:not(:disabled):hover,
+      .ha-codex-root.theme-light .modal-tabs .core-action:not(:disabled):hover {
+        color: #ffffff;
+      }
+      .ha-codex-root.theme-light .modal-tabs .bridge-action:not(:disabled):hover ha-icon,
+      .ha-codex-root.theme-light .modal-tabs .bridge-action-start:not(:disabled):hover ha-icon,
+      .ha-codex-root.theme-light .modal-tabs .core-action:not(:disabled):hover ha-icon {
+        color: inherit;
+      }
+      .ha-codex-root.theme-light .archive-search {
+        background: rgba(255, 255, 255, 0.86);
+        border-color: var(--tw-border);
+        color: var(--tw-muted);
+      }
+      .ha-codex-root.theme-light .archive-search:focus-within {
+        background: #ffffff;
+        border-color: var(--tw-primary);
+        color: var(--tw-primary);
+      }
+      .ha-codex-root.theme-light .archive-search input {
+        background: transparent;
+        color: var(--tw-text-strong);
+      }
+      .ha-codex-root.theme-light .archive-search input::placeholder {
+        color: var(--tw-muted);
+      }
+      .ha-codex-root.theme-light .settings-maintenance-row {
+        background: rgba(255, 255, 255, 0.72);
+        border: 1px solid var(--tw-border);
+        color: var(--tw-text);
+      }
+      .ha-codex-root.theme-light .settings-maintenance-row strong {
+        color: var(--tw-text-strong);
+      }
+      .ha-codex-root.theme-light .settings-maintenance-row > div span {
+        color: var(--tw-muted);
+      }
       * {
         box-sizing: border-box;
       }
@@ -2440,6 +2511,11 @@
         text-align: center;
         max-width: 360px;
       }
+      .chat > .empty {
+        grid-row: 1 / -1;
+        align-self: center;
+        justify-self: center;
+      }
       .empty-actions {
         display: flex;
         gap: 10px;
@@ -2529,6 +2605,21 @@
         display: flex;
         gap: 6px;
       }
+      .debug-tabs button {
+        align-items: center;
+        display: inline-flex;
+        gap: 6px;
+      }
+      .debug-tabs button ha-icon {
+        --mdc-icon-size: 16px;
+        flex: 0 0 auto;
+      }
+      .debug-tabs button span {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
       .modal-tabs button {
         background: transparent;
         border-color: var(--tw-border);
@@ -2599,13 +2690,6 @@
         max-width: min(820px, calc(100vw - 44px));
         min-width: min(820px, calc(100vw - 44px));
         width: min(820px, calc(100vw - 44px));
-      }
-      .builder-modal-simple {
-        height: min(650px, calc(100vh - 44px));
-        max-height: min(650px, calc(100vh - 44px));
-        max-width: min(760px, calc(100vw - 44px));
-        min-width: min(760px, calc(100vw - 44px));
-        width: min(760px, calc(100vw - 44px));
       }
       .settings-modal {
         max-width: min(980px, calc(100vw - 44px));
@@ -3244,6 +3328,7 @@
         position: relative;
       }
       .entity-combobox-chips {
+        align-items: center;
         display: flex;
         flex-wrap: wrap;
         gap: 5px;
@@ -3256,16 +3341,20 @@
         border-radius: 8px;
         color: var(--tw-text);
         display: inline-flex;
+        flex: 0 1 auto;
         font-size: 12px;
         gap: 4px;
+        justify-content: flex-start;
         line-height: 18px;
-        max-width: 100%;
+        max-width: min(220px, 100%);
         min-height: 28px;
         min-width: 0;
         padding: 4px 7px;
+        width: auto;
       }
       .entity-combobox-chip span {
         color: inherit;
+        flex: 1 1 auto;
         font-size: inherit;
         font-weight: 600;
         min-width: 0;
@@ -3304,11 +3393,52 @@
         min-height: 46px;
         padding: 8px 10px;
         text-align: left;
+        width: 100%;
+      }
+      .entity-combobox-menu .entity-combobox-option {
+        align-items: stretch;
+        gap: 8px;
+        grid-template-columns: 22px minmax(0, 1fr) auto;
+        justify-content: stretch;
+        justify-items: stretch;
       }
       .entity-combobox-menu button:hover,
       .entity-combobox-menu button:focus {
         background: rgba(59, 130, 246, 0.14);
         outline: 0;
+      }
+      .entity-combobox-option-icon {
+        --mdc-icon-size: 18px;
+        align-self: stretch;
+        color: var(--tw-primary);
+        display: inline-flex;
+        justify-self: center;
+        min-height: 100%;
+      }
+      .entity-combobox-option-main {
+        align-content: center;
+        display: grid;
+        gap: 2px;
+        justify-items: start;
+        min-width: 0;
+        text-align: left;
+      }
+      .entity-combobox-option-badge {
+        align-self: center;
+        background: rgba(148, 163, 184, 0.14);
+        border: 1px solid rgba(148, 163, 184, 0.26);
+        border-radius: 999px;
+        color: var(--tw-muted);
+        font-size: 11px;
+        font-weight: 700;
+        justify-self: end;
+        line-height: 16px;
+        max-width: 110px;
+        min-width: 0;
+        overflow: hidden;
+        padding: 2px 7px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
       .entity-combobox-menu strong {
         color: var(--tw-text-strong);

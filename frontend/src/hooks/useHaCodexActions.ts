@@ -162,9 +162,13 @@ export function useHaCodexActions(api: HaCodexApi) {
         return status;
       } catch (error) {
         const status = { ok: false, setup_complete: false, missing: ["setup status"], repo_error: errorSummary(error) };
-        ui().setGitSetupStatus(status);
-        ui().setGitPanelOpen(false);
-        ui().setGitChangedCount(0);
+        if (!ui().gitSetupStatus || isGitSetupStatusLoadError(ui().gitSetupStatus)) {
+          ui().setGitSetupStatus(status);
+          ui().setGitPanelOpen(false);
+          ui().setGitChangedCount(0);
+        } else if (loading) {
+          ui().showToast(`Git setup refresh failed: ${status.repo_error}`, "error");
+        }
         return status;
       } finally {
         if (loading) ui().setGitSetupLoading(false);

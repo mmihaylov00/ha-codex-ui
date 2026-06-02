@@ -76,6 +76,18 @@ _RUN_PLANS_KEY = "run_plans"
 _PLAN_QUESTION_STATUS = "needs_answer"
 
 
+def bundled_codex_path() -> str | None:
+    """Return the Python SDK bundled Codex binary path when installed."""
+    try:
+        from codex_cli_bin import bundled_codex_path as sdk_bundled_codex_path
+    except ImportError:
+        return None
+    try:
+        return str(sdk_bundled_codex_path())
+    except (OSError, TypeError, ValueError):
+        return None
+
+
 class CodexManager(
     RestartWatchMixin,
     RunCheckpointMixin,
@@ -178,18 +190,35 @@ class CodexManager(
 
     async def async_probe(self) -> dict[str, Any]:
         """Probe Codex and Home Assistant runtime capabilities."""
-        codex_path = which(self.codex_command) or (
-            self.codex_command if Path(self.codex_command).exists() else None
+        codex_command = self.codex_command.strip()
+        bridge_sdk_mode = bool(self.bridge_url and not codex_command)
+        if bridge_sdk_mode:
+            codex_path = bundled_codex_path()
+            probe_command = codex_path
+        else:
+            probe_command = codex_command or "codex"
+            codex_path = which(probe_command) or (
+                probe_command if Path(probe_command).exists() else None
+            )
+        version = (
+            await self._run_small_command([probe_command, "--version"])
+            if probe_command
+            else {"ok": False, "stdout": "", "stderr": "Codex runtime is not available"}
         )
-        version = await self._run_small_command([self.codex_command, "--version"])
-        exec_help = await self._run_small_command([self.codex_command, "exec", "--help"])
+        exec_help = (
+            {"ok": True, "stdout": "SDK app-server", "stderr": ""}
+            if bridge_sdk_mode and codex_path
+            else await self._run_small_command([probe_command, "exec", "--help"])
+            if probe_command
+            else {"ok": False, "stdout": "", "stderr": "Codex exec is not available"}
+        )
         self.addon_paths = discover_addon_paths(self.addon_write_scope)
         self.validation_command = discover_validation_command(
             self.validation_config,
             config_path=self.hass.config.path(),
         )
         runner_options = RunnerOptions(
-            codex_command=self.codex_command,
+            codex_command=probe_command or "",
             workspace_path=self.workspace_path,
             writable_paths=self.addon_paths,
         )
@@ -199,7 +228,9 @@ class CodexManager(
             else CodexProcessRunner(runner_options)
         )
         self.runtime_status = {
-            "runner_type": "bridge"
+            "runner_type": "bridge-sdk"
+            if bridge_sdk_mode and codex_path
+            else "bridge"
             if self.bridge_url
             else ("direct" if codex_path else "unavailable"),
             "bridge_available": bool(self.bridge_url),
@@ -208,6 +239,9 @@ class CodexManager(
             "codex_path": codex_path,
             "codex_version": version["stdout"].strip() if version["ok"] else None,
             "codex_exec_available": exec_help["ok"],
+            "codex_runtime_error": None
+            if (codex_path or not bridge_sdk_mode)
+            else "Python SDK bundled Codex runtime is not installed",
             "workspace_path": self.workspace_path,
             "workspace_exists": Path(self.workspace_path).is_dir(),
             "addon_paths": self.addon_paths,

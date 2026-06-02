@@ -55,9 +55,11 @@ Before installing HA Codex UI, make sure you have:
   in with an administrator account. Keep HA Codex UI admin-only.
 - **Terminal access to Home Assistant**: the installation below uses a shell
   that can access `/config`.
-- **Download tools**: the installation below uses `curl`, `sh`, and `unzip` in
-  the Home Assistant terminal.
+- **Download tools**: the installation below uses `curl` and `unzip` in the
+  Home Assistant terminal.
 - **Codex access**: use an OpenAI or ChatGPT account with Codex access enabled.
+- **Supported runtime**: Home Assistant must run Python 3.10 or newer on Linux
+  `x86_64` or `aarch64` so the pinned Codex SDK runtime can be installed.
 - **Optional Git integration requirements**: to use the Git setup page, your
   Home Assistant shell also needs `git`, `ssh-keygen`, network access to your Git
   host, and permission to add the generated SSH public key to the remote account
@@ -68,7 +70,7 @@ Before installing HA Codex UI, make sure you have:
 Follow these steps in order. The commands and UI values use the default HA Codex
 UI paths:
 
-- Codex CLI executable: `/config/bin/codex`
+- Codex runtime: pinned Python SDK runtime installed by Home Assistant
 - Codex credentials: `/config/codex_home`
 - Workspace path: `/config`
 - Bridge URL: `http://127.0.0.1:8765`
@@ -76,7 +78,7 @@ UI paths:
 ### 1. Open a Home Assistant terminal
 
 Home Assistant OS users usually need a terminal before they can install the
-Codex CLI. The simplest path is Advanced SSH & Web Terminal:
+integration files. The simplest path is Advanced SSH & Web Terminal:
 
 1. Open Home Assistant.
 2. Go to **Settings > Apps** or **Settings > Add-ons**, depending on your Home
@@ -100,9 +102,8 @@ cd /config
 
 ### 2. Check terminal download tools
 
-The recommended Codex CLI install uses the standalone installer from OpenAI's
-Codex CLI docs. The manual HA Codex UI install downloads and extracts the GitHub
-release package. Check that `curl` and `unzip` are available:
+The manual HA Codex UI install downloads and extracts the GitHub release
+package. Check that `curl` and `unzip` are available:
 
 ```sh
 curl --version
@@ -125,35 +126,15 @@ curl --version
 unzip -v
 ```
 
-### 3. Install the Codex CLI at `/config/bin/codex`
+### 3. Codex runtime
 
-HA Codex UI does not bundle the Codex CLI or credentials. Install Codex with the
-standalone installer, then copy the installed binary to `/config/bin/codex`.
-That path is the default value used by the integration option `codex_command`.
+HA Codex UI uses OpenAI's Python Codex SDK by default. Home Assistant installs
+the pinned `openai-codex==0.1.0b2` dependency declared by the integration, and
+that SDK dependency includes the matching local Codex runtime binary.
 
-```sh
-mkdir -p /config/bin
-curl -fsSL https://chatgpt.com/codex/install.sh | CODEX_NON_INTERACTIVE=1 sh
-CODEX_INSTALLED="${HOME}/.local/bin/codex"
-if [ ! -x "$CODEX_INSTALLED" ]; then
-  CODEX_INSTALLED="$(command -v codex || true)"
-fi
-test -x "$CODEX_INSTALLED"
-if [ "$CODEX_INSTALLED" != "/config/bin/codex" ]; then
-  cp "$CODEX_INSTALLED" /config/bin/codex
-  chmod 0755 /config/bin/codex
-fi
-/config/bin/codex --version
-```
-
-OpenAI's official Codex CLI setup is documented in the
-[Codex CLI getting started guide](https://developers.openai.com/codex/cli#cli-setup).
-The same installer can be rerun later to upgrade Codex; after upgrading, copy the
-new binary to `/config/bin/codex` again.
-
-If you install Codex somewhere else, write down that executable path. You must
-set it later in **Settings > Devices & services > HA Codex UI > Configure** as
-`codex_command`.
+You only need a custom CLI path if you intentionally want to override the pinned
+SDK runtime. In that case, install Codex separately and set the integration
+option `codex_command` to the absolute executable path or a command on `PATH`.
 
 Optional Git integration check:
 
@@ -197,7 +178,7 @@ After Home Assistant restarts:
 | --- | --- | --- | --- |
 | `workspace_path` | `/config` | Any Home Assistant-accessible filesystem path, usually `/config`. | Codex runs from this Home Assistant config directory. |
 | `require_admin` | `true` | `true` or `false`. Keep `true` unless you intentionally want non-admin access. | Keeps the Codex sidebar panel admin-only. |
-| `codex_command` | `/config/bin/codex` | Absolute executable path such as `/config/bin/codex`, or command name such as `codex` if it is on `PATH`. | Must match the CLI path created in step 3. |
+| `codex_command` | blank | Blank to use the pinned SDK runtime, an absolute executable path, or a command name on `PATH`. | Optional custom Codex CLI override. |
 | `bridge_url` | `http://127.0.0.1:8765` | Local URL such as `http://127.0.0.1:8765`, or blank/`none`/`null` to disable bridge mode. | Enables the packaged local bridge. |
 | `addon_write_scope` | `all_visible` | `all_visible`, `none`, blank, or comma-separated absolute paths such as `/addons,/addon_configs`. | Lets Codex see writable add-on folders when present. |
 | `validation_command` | `auto` | `auto`, `none`, blank, or command text such as `ha core check`. | Lets HA Codex choose `ha core check` when available. |
@@ -226,8 +207,8 @@ from the HA Codex UI Account tab:
 ### 7. Verify the first run
 
 1. Open **Codex** in the Home Assistant sidebar.
-2. Open **Settings > Debug** and confirm the Codex command, bridge URL, and
-   workspace path look correct.
+2. Open **Settings > Debug** and confirm the runner, bridge URL, and workspace
+   path look correct.
 3. Start with a read-only prompt, such as:
 
 ```text
@@ -247,7 +228,7 @@ the important values are created or edited:
 | Value | Where to set it | Default or path |
 | --- | --- | --- |
 | Integration files | Home Assistant terminal, installation step 4 | `/config/custom_components/ha_codex` |
-| Codex CLI install path | Home Assistant terminal, installation step 3 | `/config/bin/codex` |
+| Codex runtime | Home Assistant Python requirements | Pinned SDK runtime |
 | Integration options | **Settings > Devices & services > HA Codex UI > Configure** | See the table below |
 | Codex credentials | **Codex > Settings > Account** | `/config/codex_home` |
 | Git remote and SSH key | **Codex > Settings > Git** | Set only if you want Git review, commit, and push controls |
@@ -258,7 +239,7 @@ The integration setup form is prefilled with these defaults:
 | --- | --- | --- | --- |
 | `workspace_path` | `/config` | Any Home Assistant-accessible filesystem path, usually `/config`. | Directory where Codex runs. |
 | `require_admin` | `true` | `true` or `false`. | Restricts the sidebar panel to Home Assistant administrators. |
-| `codex_command` | `/config/bin/codex` | Absolute executable path or command name on `PATH`. | Codex CLI executable. |
+| `codex_command` | blank | Blank, absolute executable path, or command name on `PATH`. | Optional custom Codex CLI override. |
 | `bridge_url` | `http://127.0.0.1:8765` | Local URL, blank, `none`, or `null`. | Local bridge URL. |
 | `addon_write_scope` | `all_visible` | `all_visible`, `none`, blank, comma-separated absolute paths, or a YAML list for YAML configuration. | Extra add-on paths exposed to Codex when present. |
 | `validation_command` | `auto` | `auto`, `none`, blank, command text, or a YAML list for YAML configuration. | Uses `ha core check` or `hass --script check_config` when available. |
@@ -273,7 +254,7 @@ a Home Assistant config entry when possible:
 ha_codex:
   workspace_path: /config
   require_admin: true
-  codex_command: /config/bin/codex
+  codex_command:
   bridge_url: http://127.0.0.1:8765
   addon_write_scope: all_visible
   validation_command: auto
@@ -306,8 +287,8 @@ enable Codex access for your user or role. OpenAI's
 describes Codex Local as the control for CLI, IDE extension, and local app
 workflows.
 
-You can also authenticate manually from a shell that can run the same Codex
-binary:
+You can also authenticate manually from a shell when you configured a custom
+Codex binary:
 
 ```sh
 CODEX_HOME=/config/codex_home /config/bin/codex login --device-auth
@@ -322,7 +303,9 @@ bridge credential directory used by HA Codex UI.
 
 `bridge_url: http://127.0.0.1:8765` enables the packaged local bridge. The bridge
 runs Codex outside Home Assistant Core so Codex inherits a safer process
-environment and can stream approvals back to the panel.
+environment and can stream approvals back to the panel. By default the bridge
+uses the pinned Python SDK runtime; `codex_command` is only needed for a custom
+CLI override.
 
 When the integration starts and `bridge_url` is configured, it starts the bridge
 from:

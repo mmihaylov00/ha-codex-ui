@@ -28,13 +28,13 @@ interface SettingsModalProps {
   onArchiveCleanup: () => void;
 }
 
-const TABS: Array<{ id: SettingsTab; label: string }> = [
-  { id: "account", label: "Account" },
-  { id: "git", label: "Git" },
-  { id: "run", label: "Run" },
-  { id: "models", label: "Models" },
-  { id: "debug", label: "Debug" },
-  { id: "bridge-log", label: "Bridge Log" },
+const TABS: Array<{ id: SettingsTab; label: string; icon: string }> = [
+  { id: "account", label: "Account", icon: "mdi:account-outline" },
+  { id: "git", label: "Git", icon: "mdi:source-branch" },
+  { id: "run", label: "Run", icon: "mdi:play-circle-outline" },
+  { id: "models", label: "Models", icon: "mdi:robot" },
+  { id: "debug", label: "Debug", icon: "mdi:bug" },
+  { id: "bridge-log", label: "Bridge Log", icon: "mdi:text-box-outline" },
 ];
 
 export function SettingsModal({ onClose, onTab, onSettingsSave, onBridgeRestart, onCoreRestart, onBridgeLogRefresh, onBridgeLogClear, onDeviceLogin, onDeviceLoginCancel, onAccountLogout, onGitSetupRefresh, onGitSetupGenerateKey, onGitSetupRemoteSave, onGitSetupPull, onGitSetupBranchChange, onGitSetupCommitCheckout, onArchiveCleanup }: SettingsModalProps) {
@@ -57,7 +57,10 @@ export function SettingsModal({ onClose, onTab, onSettingsSave, onBridgeRestart,
         <div className="modal-tabs">
           <div className="debug-tabs" role="tablist" aria-label="Settings views">
             {TABS.map((item) => (
-              <button className={tab === item.id ? "active" : ""} onClick={() => onTab(item.id)} role="tab" aria-selected={tab === item.id} key={item.id}>{item.label}</button>
+              <button className={tab === item.id ? "active" : ""} onClick={() => onTab(item.id)} role="tab" aria-selected={tab === item.id} key={item.id}>
+                <Icon icon={item.icon} />
+                <span>{item.label}</span>
+              </button>
             ))}
           </div>
           <span className="modal-tab-spacer" />
@@ -267,7 +270,6 @@ function GitSetupTab({
         <GitSetupCard label="Git" value={status?.git_available ? "Available" : "Missing"} detail={status?.git_version || "git command"} ok={status?.git_available === true} />
         <GitSetupCard label="Repository" value={status?.repository ? "Initialized" : "Not initialized"} detail={status?.work_tree || status?.repo_error || "Home Assistant config"} ok={status?.repository === true} />
         <GitSetupCard label="SSH key" value={status?.ssh_key_exists ? "Created" : "Missing"} detail={status?.ssh_key_path || "/config/.ssh"} ok={status?.ssh_key_exists === true || status?.remote_uses_ssh === false} />
-        <GitSetupCard label="Origin" value={status?.remote_configured ? "Linked" : "Missing"} detail={status?.remote_url || "No origin remote"} ok={status?.remote_configured === true} />
         <GitSetupBranchCard branch={branchDraft} currentBranch={status?.branch || ""} upstream={status?.upstream || ""} running={running} repository={status?.repository === true} onBranchChange={setBranchDraft} onSubmit={onBranchChange} />
         <GitSetupPullCard onPull={onPull} running={running} remoteConfigured={status?.remote_configured === true} />
       </div>
@@ -353,7 +355,6 @@ function GitSetupBranchCard({
 }
 
 function GitSetupPullCard({ onPull, running, remoteConfigured }: { onPull: () => void; running: boolean; remoteConfigured: boolean }) {
-  const detail = remoteConfigured ? "Pull latest changes from origin." : "Link an origin remote first.";
   return (
     <div className={`runtime-card git-setup-action-card ${remoteConfigured ? "success" : "warning"}`}>
       <span>Pull</span>
@@ -362,7 +363,6 @@ function GitSetupPullCard({ onPull, running, remoteConfigured }: { onPull: () =>
         <Icon icon={running ? "mdi:progress-clock" : "mdi:source-pull"} />
         Pull from origin
       </button>
-      <small title={detail}>{detail}</small>
     </div>
   );
 }
