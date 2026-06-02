@@ -3002,7 +3002,7 @@
       .git-setup-cards {
         display: grid;
         gap: 8px;
-        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        grid-template-columns: repeat(3, minmax(0, 1fr));
       }
       .git-setup-section {
         gap: 10px;
@@ -3027,14 +3027,12 @@
         overflow-wrap: anywhere;
       }
       .git-public-key-row {
-        align-items: stretch;
         display: grid;
         gap: 8px;
-        grid-template-columns: auto minmax(0, 1fr);
+        grid-template-columns: minmax(0, 1fr);
         min-width: 0;
       }
       .git-public-key-row > button {
-        align-self: start;
         white-space: nowrap;
       }
       .git-public-key-row .muted {
@@ -3172,11 +3170,26 @@
         white-space: pre-wrap;
         word-break: break-all;
       }
-      .git-remote-form {
+      .git-public-key-inline {
         align-items: center;
+        gap: 6px;
+      }
+      .git-public-key-inline pre {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        word-break: normal;
+      }
+      .git-public-key .icon-button {
+        height: 32px;
+        margin-top: 0;
+        min-height: 32px;
+        width: 32px;
+      }
+      .git-remote-form {
         display: grid;
         gap: 8px;
-        grid-template-columns: minmax(0, 1fr) auto;
+        grid-template-columns: minmax(0, 1fr);
         min-width: 0;
       }
       .git-remote-form input {
@@ -4124,7 +4137,10 @@
         .diff-lines {
           max-height: 44vh;
         }
-        .runtime-cards {
-          grid-template-columns: repeat(2, minmax(0, 1fr));
-        }
-      }
+            .runtime-cards {
+              grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+            .git-setup-cards {
+              grid-template-columns: minmax(0, 1fr);
+            }
+          }

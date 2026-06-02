@@ -350,7 +350,7 @@ function GitSetupRepositoryCard({
         <input value={remoteDraft} onChange={(event) => onRemoteChange(event.currentTarget.value)} placeholder="git@github.com:owner/repository.git" aria-label="Git origin remote URL" />
         <button onClick={() => onRemoteSave(remoteDraft)} disabled={running || !remoteDraft.trim()}>
           <Icon icon={running ? "mdi:progress-clock" : "mdi:link-variant-plus"} />
-          <span>Save remote</span>
+          <span>Save</span>
         </button>
       </div>
     </div>
@@ -381,12 +381,8 @@ function GitSetupSshKeyCard({
       <strong>{sshKeyExists ? "Created" : "Missing"}</strong>
       <small title={detail}>{detail}</small>
       <div className="git-public-key-row">
-        <button onClick={onGenerateKey} disabled={running}>
-          <Icon icon={running ? "mdi:progress-clock" : sshKeyExists ? "mdi:key-change" : "mdi:key-plus"} />
-          <span>{sshKeyExists ? "Recreate key" : "Generate key"}</span>
-        </button>
         {publicKey ? (
-          <div className={`git-public-key ${keyCopied ? "copied" : ""}`}>
+          <div className={`git-public-key git-public-key-inline ${keyCopied ? "copied" : ""}`}>
             <pre>{publicKey}</pre>
             <button className="icon-button" onClick={onCopyPublicKey} title={keyCopied ? "Copied" : "Copy public key"} aria-label={keyCopied ? "Copied" : "Copy public key"}>
               <Icon icon={keyCopied ? "mdi:check" : "mdi:content-copy"} />
@@ -395,6 +391,10 @@ function GitSetupSshKeyCard({
         ) : (
           <span className="muted">Generate a key to show the public key.</span>
         )}
+        <button onClick={onGenerateKey} disabled={running}>
+          <Icon icon={running ? "mdi:progress-clock" : sshKeyExists ? "mdi:key-change" : "mdi:key-plus"} />
+          <span>{sshKeyExists ? "Recreate key" : "Generate key"}</span>
+        </button>
       </div>
       <a className="git-ssh-keys-link" href="https://docs.github.com/en/authentication/connecting-to-github-with-ssh/adding-a-new-ssh-key-to-your-github-account" target="_blank" rel="noreferrer">GitHub SSH keys</a>
     </div>

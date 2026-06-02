@@ -17,12 +17,34 @@ function localSessionId() {
 
 function gitOperationFailureMessage(result: GitChanges, fallback: string): string {
   const failed = result.results?.find((item) => item.ok === false);
-  return stripAnsi([failed?.stdout, failed?.stderr, result.stdout, result.stderr].filter(Boolean).join("\n")).trim() || fallback;
+  return commandFailureMessage(fallback, "", failed, result.stdout, result.stderr);
 }
 
 function gitSetupResultMessage(result: GitSetupResult, fallback: string): string {
   const failed = result.results?.find((item) => item.ok === false);
-  return stripAnsi([failed?.stdout, failed?.stderr, result.stdout, result.stderr].filter(Boolean).join("\n")).trim() || fallback;
+  return commandFailureMessage(fallback, result.step || "", failed, result.stdout, result.stderr);
+}
+
+function gitSetupThrownErrorMessage(fallback: string, error: unknown): string {
+  const detail = stripAnsi(errorSummary(error)).trim();
+  return detail ? `${fallback}: ${detail}` : fallback;
+}
+
+function commandFailureMessage(
+  fallback: string,
+  step: string,
+  failed: { stdout?: string; stderr?: string; returncode?: number | null } | undefined,
+  stdout?: string,
+  stderr?: string,
+): string {
+  const output = stripAnsi([failed?.stdout, failed?.stderr, stdout, stderr].filter(Boolean).join("\n")).trim();
+  const returncode = failed?.returncode;
+  const context = [
+    step ? `step ${step}` : "",
+    returncode !== undefined && returncode !== null ? `return code ${returncode}` : "",
+  ].filter(Boolean).join(", ");
+  const prefix = context ? `${fallback} (${context})` : fallback;
+  return output ? `${prefix}:\n${output}` : prefix;
 }
 
 function sessionRunSettingsKey(session: CodexSession | undefined): string {
@@ -645,7 +667,14 @@ export function useHaCodexActions(api: HaCodexApi) {
         ui().setGitSetupActionRunning(true);
         ui().setGitSetupResult(null);
         try {
-          const result = await api.gitSetupPull();
+          let result: GitSetupResult;
+          try {
+            result = await api.gitSetupPull();
+          } catch (error) {
+            const message = gitSetupThrownErrorMessage("Git pull failed", error);
+            ui().setGitSetupResult({ ok: false, step: "pull", stderr: message });
+            throw new Error(message);
+          }
           ui().setGitSetupResult(result);
           if (result.status) ui().setGitSetupStatus(result.status);
           if (!result.ok) throw new Error(gitSetupResultMessage(result, "Git pull failed"));
@@ -668,7 +697,14 @@ export function useHaCodexActions(api: HaCodexApi) {
         ui().setGitSetupActionRunning(true);
         ui().setGitSetupResult(null);
         try {
-          const result = await api.gitSetupChangeBranch(value);
+          let result: GitSetupResult;
+          try {
+            result = await api.gitSetupChangeBranch(value);
+          } catch (error) {
+            const message = gitSetupThrownErrorMessage("Branch change failed", error);
+            ui().setGitSetupResult({ ok: false, step: "change_branch", stderr: message });
+            throw new Error(message);
+          }
           ui().setGitSetupResult(result);
           if (result.status) ui().setGitSetupStatus(result.status);
           if (!result.ok) throw new Error(gitSetupResultMessage(result, "Branch change failed"));
@@ -689,7 +725,14 @@ export function useHaCodexActions(api: HaCodexApi) {
         ui().setGitSetupActionRunning(true);
         ui().setGitSetupResult(null);
         try {
-          const result = await api.gitSetupCheckoutCommit(value);
+          let result: GitSetupResult;
+          try {
+            result = await api.gitSetupCheckoutCommit(value);
+          } catch (error) {
+            const message = gitSetupThrownErrorMessage("Commit restore failed", error);
+            ui().setGitSetupResult({ ok: false, step: "restore", stderr: message });
+            throw new Error(message);
+          }
           ui().setGitSetupResult(result);
           if (result.status) ui().setGitSetupStatus(result.status);
           if (!result.ok) throw new Error(gitSetupResultMessage(result, "Commit restore failed"));

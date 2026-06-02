@@ -2354,6 +2354,8 @@ class GitCommandTests(unittest.TestCase):
             command,
             [
                 "git",
+                "-C",
+                str(root),
                 f"--git-dir={root / '.git-real'}",
                 f"--work-tree={root}",
                 "status",
@@ -2884,6 +2886,27 @@ class GitReviewOperationTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(_git(root, "rev-parse", "HEAD").stdout.strip(), latest_commit)
             self.assertEqual(_git(root, "branch", "--show-current").stdout.strip(), "main")
             self.assertIn("M  configuration.yaml", _git(root, "status", "--short").stdout)
+
+    async def test_git_setup_checkout_commit_restores_with_git_real_metadata(self):
+        with TemporaryDirectory(dir=CONFIG_TEMP_DIR) as tmp:
+            root, _remote = _create_git_repo(Path(tmp))
+            first_commit = _git(root, "rev-parse", "HEAD").stdout.strip()
+            (root / "configuration.yaml").write_text(
+                "homeassistant:\n  name: Newer\n",
+                encoding="utf-8",
+            )
+            _git(root, "commit", "-am", "newer config")
+            (root / ".git").rename(root / ".git-real")
+            manager = _make_manager(root)
+
+            result = await manager.async_git_setup_checkout_commit(first_commit)
+
+            self.assertTrue(result["ok"], result)
+            self.assertEqual(result["step"], "restore")
+            self.assertEqual(
+                (root / "configuration.yaml").read_text(encoding="utf-8"),
+                "homeassistant:\n  name: Base\n",
+            )
 
     async def test_git_setup_restore_commit_keeps_setup_on_current_branch(self):
         with TemporaryDirectory(dir=CONFIG_TEMP_DIR) as tmp:

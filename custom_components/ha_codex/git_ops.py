@@ -1340,10 +1340,13 @@ class GitOperationsMixin:
         config_path = Path(self.hass.config.path())
         config_git_dir = config_path / ".git-real"
         if config_git_dir.is_dir():
+            work_tree = self._git_work_tree(config_git_dir, config_path)
             return [
                 "git",
+                "-C",
+                work_tree,
                 f"--git-dir={config_git_dir}",
-                f"--work-tree={self._git_work_tree(config_git_dir, config_path)}",
+                f"--work-tree={work_tree}",
                 *ssh_args,
                 *args,
             ]
@@ -1351,10 +1354,13 @@ class GitOperationsMixin:
         workspace_path = Path(self.workspace_path)
         workspace_git_dir = workspace_path / ".git-real"
         if workspace_git_dir.is_dir():
+            work_tree = self._git_work_tree(workspace_git_dir, workspace_path)
             return [
                 "git",
+                "-C",
+                work_tree,
                 f"--git-dir={workspace_git_dir}",
-                f"--work-tree={self._git_work_tree(workspace_git_dir, workspace_path)}",
+                f"--work-tree={work_tree}",
                 *ssh_args,
                 *args,
             ]

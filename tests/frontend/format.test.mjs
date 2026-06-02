@@ -53,6 +53,9 @@ test("elapsed and duration helpers handle long spans", () => {
 
 test("error and timestamp helpers normalize display values", () => {
   assert.equal(errorSummary(new Error("Bridge offline")), "Bridge offline");
+  assert.equal(errorSummary({ code: "unknown", message: "Git pull failed: conflict" }), "Git pull failed: conflict");
+  assert.equal(errorSummary({ name: "WS", code: 400, message: "Bad payload" }), "Bad payload (WS code 400)");
+  assert.equal(errorSummary({ name: "WS", code: "unknown", data: { step: "pull" } }), 'WS code unknown: data: {"step":"pull"}');
   assert.equal(errorSummary({ name: "HTTP", code: 500 }), "HTTP code 500");
   assert.equal(errorSummary("unknown"), "unknown");
   assert.equal(formatTimestampTitle(0), "");

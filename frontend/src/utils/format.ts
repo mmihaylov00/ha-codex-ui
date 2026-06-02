@@ -79,11 +79,41 @@ function timestampSeconds(value: unknown): number | null {
 
 export function errorSummary(error: unknown): string {
   if (error instanceof Error && error.message) return error.message;
-  if (typeof error === "object" && error && "code" in error) {
-    const item = error as { name?: string; code?: string | number };
-    return `${item.name || "Error"} code ${item.code}`;
+  if (typeof error === "object" && error) {
+    const item = error as Record<string, unknown>;
+    const message = firstText(item.message, item.error, item.reason, item.stderr);
+    const code = firstText(item.code);
+    const name = firstText(item.name, item.type) || "Error";
+    if (message) {
+      return code && code !== "unknown" ? `${message} (${name} code ${code})` : message;
+    }
+    const details = Object.entries(item)
+      .filter(([key, value]) => !["name", "type", "code"].includes(key) && value !== null && value !== undefined && value !== "")
+      .map(([key, value]) => `${key}: ${briefValue(value)}`)
+      .filter(Boolean)
+      .join(", ");
+    if (details) return code ? `${name} code ${code}: ${details}` : `${name}: ${details}`;
+    if (code) return `${name} code ${code}`;
   }
   return String(error);
+}
+
+function firstText(...values: unknown[]): string {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) return value.trim();
+    if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  }
+  return "";
+}
+
+function briefValue(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
 }
 
 export async function copyText(value: string): Promise<void> {
