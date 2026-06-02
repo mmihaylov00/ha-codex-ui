@@ -36,7 +36,10 @@ jobs:
       - name: Create zipped release package
         run: |
           cd custom_components/ha_codex
-          zip -r ../../../ha_codex.zip .
+          zip -r ../../ha_codex.zip .
+          cd ../..
+          test -s ha_codex.zip
+          unzip -l ha_codex.zip manifest.json frontend/panel.js bridge/ha_codex_bridge.py brand/icon.png
 
       - name: Upload release package
         uses: softprops/action-gh-release@v2
