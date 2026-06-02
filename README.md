@@ -185,14 +185,14 @@ After Home Assistant restarts:
 3. Search for **HA Codex UI**.
 4. Confirm or set these options:
 
-| Option | Set it to | Where it is used |
-| --- | --- | --- |
-| `workspace_path` | `/config` | Codex runs from this Home Assistant config directory. |
-| `require_admin` | `true` | Keeps the Codex sidebar panel admin-only. |
-| `codex_command` | `/config/bin/codex` | Must match the CLI path created in step 3. |
-| `bridge_url` | `http://127.0.0.1:8765` | Enables the packaged local bridge. |
-| `addon_write_scope` | `all_visible` | Lets Codex see writable add-on folders when present. |
-| `validation_command` | `auto` | Lets HA Codex choose `ha core check` when available. |
+| Option | Set it to | Possible values | Where it is used |
+| --- | --- | --- | --- |
+| `workspace_path` | `/config` | Any Home Assistant-accessible filesystem path, usually `/config`. | Codex runs from this Home Assistant config directory. |
+| `require_admin` | `true` | `true` or `false`. Keep `true` unless you intentionally want non-admin access. | Keeps the Codex sidebar panel admin-only. |
+| `codex_command` | `/config/bin/codex` | Absolute executable path such as `/config/bin/codex`, or command name such as `codex` if it is on `PATH`. | Must match the CLI path created in step 3. |
+| `bridge_url` | `http://127.0.0.1:8765` | Local URL such as `http://127.0.0.1:8765`, or blank/`none`/`null` to disable bridge mode. | Enables the packaged local bridge. |
+| `addon_write_scope` | `all_visible` | `all_visible`, `none`, blank, or comma-separated absolute paths such as `/addons,/addon_configs`. | Lets Codex see writable add-on folders when present. |
+| `validation_command` | `auto` | `auto`, `none`, blank, or command text such as `ha core check`. | Lets HA Codex choose `ha core check` when available. |
 
 To edit these values later, open **Settings > Devices & services**, select
 **HA Codex UI**, and choose **Configure**.
@@ -246,14 +246,14 @@ the important values are created or edited:
 
 The integration setup form is prefilled with these defaults:
 
-| Option | Default | Purpose |
-| --- | --- | --- |
-| `workspace_path` | `/config` | Directory where Codex runs. |
-| `require_admin` | `true` | Restricts the sidebar panel to Home Assistant administrators. |
-| `codex_command` | `/config/bin/codex` | Codex CLI executable or absolute path. |
-| `bridge_url` | `http://127.0.0.1:8765` | Local bridge URL. |
-| `addon_write_scope` | `all_visible` | Extra add-on paths exposed to Codex when present. |
-| `validation_command` | `auto` | Uses `ha core check` or `hass --script check_config` when available. |
+| Option | Default | Possible values | Purpose |
+| --- | --- | --- | --- |
+| `workspace_path` | `/config` | Any Home Assistant-accessible filesystem path, usually `/config`. | Directory where Codex runs. |
+| `require_admin` | `true` | `true` or `false`. | Restricts the sidebar panel to Home Assistant administrators. |
+| `codex_command` | `/config/bin/codex` | Absolute executable path or command name on `PATH`. | Codex CLI executable. |
+| `bridge_url` | `http://127.0.0.1:8765` | Local URL, blank, `none`, or `null`. | Local bridge URL. |
+| `addon_write_scope` | `all_visible` | `all_visible`, `none`, blank, comma-separated absolute paths, or a YAML list for YAML configuration. | Extra add-on paths exposed to Codex when present. |
+| `validation_command` | `auto` | `auto`, `none`, blank, command text, or a YAML list for YAML configuration. | Uses `ha core check` or `hass --script check_config` when available. |
 
 To edit these later, open **Settings > Devices & services**, select
 **HA Codex UI**, and choose **Configure**.
