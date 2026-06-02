@@ -8,9 +8,39 @@ This integration can execute commands and edit files in your Home Assistant
 configuration. Keep `require_admin: true`, review approval prompts carefully, and
 install it only on Home Assistant instances you control.
 
+![HA Codex UI running in Home Assistant](docs/assets/codex-working.png)
+
 ## Installation
 
-Install with HACS as an integration.
+Install the Codex CLI first, then install HA Codex UI with HACS as an
+integration.
+
+### Install Codex CLI
+
+HA Codex UI does not bundle the Codex CLI or credentials. The OpenAI Codex CLI
+can be installed with npm; see the
+[OpenAI Codex CLI getting started guide](https://help.openai.com/en/articles/11096431)
+for the current official install guidance.
+
+```sh
+npm install -g @openai/codex
+```
+
+For Home Assistant OS, run this from a shell with `npm` available, or copy an
+already-installed CLI into a path Home Assistant Core can execute. This
+configuration uses `/config/bin/codex`:
+
+```sh
+mkdir -p /config/bin /config/codex-cli
+npm install --global --prefix /config/codex-cli @openai/codex
+ln -sf /config/codex-cli/bin/codex /config/bin/codex
+/config/bin/codex --version
+```
+
+If you install Codex somewhere else, set `codex_command` in `configuration.yaml`
+to that executable path.
+
+### Install HA Codex UI
 
 [![Open your Home Assistant instance and open a repository inside HACS.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=mmihaylov00&repository=ha-codex-ui&category=integration)
 
@@ -49,9 +79,8 @@ loads the integration.
 
 ## Codex CLI
 
-HA Codex UI does not bundle the Codex CLI or credentials. Install Codex yourself
-and set `codex_command` to the executable path. A common Home Assistant OS path
-is:
+Install Codex yourself and set `codex_command` to the executable path. A common
+Home Assistant OS path is:
 
 ```yaml
 codex_command: /config/bin/codex
@@ -134,4 +163,3 @@ custom_components/ha_codex/frontend/panel.js
 ## License
 
 Apache-2.0
-
