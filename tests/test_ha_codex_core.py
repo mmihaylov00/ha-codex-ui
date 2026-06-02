@@ -2563,7 +2563,7 @@ class GitOperationsHelperTests(unittest.IsolatedAsyncioTestCase):
                     }
                 ],
             )
-            self.assertIn("current branch", status["missing"])
+            self.assertNotIn("current branch", status["missing"])
             self.assertIn("SSH key", status["missing"])
 
             ssh_dir = root / ".ssh"
@@ -2572,23 +2572,30 @@ class GitOperationsHelperTests(unittest.IsolatedAsyncioTestCase):
             public_key = ssh_dir / "ha_codex_ed25519.pub"
             private_key.write_text("private", encoding="utf-8")
             public_key.write_text("ssh-ed25519 AAA test", encoding="utf-8")
-            existing = await GitOperationsMixin.async_git_setup_generate_key(manager)
-            self.assertEqual(existing["step"], "exists")
-            self.assertEqual(existing["public_key"], "ssh-ed25519 AAA test")
-
-            private_key.unlink()
-            public_key.unlink()
+            generated_paths = []
 
             async def keygen(command, **_kwargs):
                 self.assertIn("ssh-keygen", command)
-                private_key.write_text("private", encoding="utf-8")
-                public_key.write_text("ssh-ed25519 BBB generated", encoding="utf-8")
+                generated_path = Path(command[-1])
+                generated_paths.append(generated_path)
+                generated_path.write_text("private generated", encoding="utf-8")
+                generated_path.with_suffix(f"{generated_path.suffix}.pub").write_text(
+                    "ssh-ed25519 BBB generated",
+                    encoding="utf-8",
+                )
                 return _cmd(stdout="generated")
 
             manager._run_command = keygen
             generated = await GitOperationsMixin.async_git_setup_generate_key(manager)
             self.assertTrue(generated["ok"])
+            self.assertEqual(generated["step"], "generate_key")
             self.assertEqual(generated["public_key"], "ssh-ed25519 BBB generated")
+            self.assertEqual(private_key.read_text(encoding="utf-8"), "private generated")
+            self.assertEqual(public_key.read_text(encoding="utf-8"), "ssh-ed25519 BBB generated")
+            self.assertTrue(generated_paths)
+            self.assertNotEqual(generated_paths[0], private_key)
+            self.assertFalse(generated_paths[0].exists())
+            self.assertFalse(generated_paths[0].with_suffix(f"{generated_paths[0].suffix}.pub").exists())
 
     async def test_git_setup_remote_and_pull_cover_fallback_branches(self):
         with TemporaryDirectory(dir=CONFIG_TEMP_DIR) as tmp:
@@ -2848,8 +2855,37 @@ class GitReviewOperationTests(unittest.IsolatedAsyncioTestCase):
                 (root / "configuration.yaml").read_text(encoding="utf-8"),
                 "homeassistant:\n  name: Dev\n",
             )
+            self.assertEqual(result["status"]["branch"], "dev")
+            self.assertEqual(result["status"]["history"][0]["subject"], "dev branch")
 
     async def test_git_setup_checkout_commit_restores_previous_config(self):
+        with TemporaryDirectory(dir=CONFIG_TEMP_DIR) as tmp:
+            root, _remote = _create_git_repo(Path(tmp))
+            first_commit = _git(root, "rev-parse", "HEAD").stdout.strip()
+            (root / "configuration.yaml").write_text(
+                "homeassistant:\n  name: Newer\n",
+                encoding="utf-8",
+            )
+            (root / "automations.yaml").write_text("[]\n", encoding="utf-8")
+            _git(root, "add", "configuration.yaml", "automations.yaml")
+            _git(root, "commit", "-am", "newer config")
+            latest_commit = _git(root, "rev-parse", "HEAD").stdout.strip()
+            manager = _make_manager(root)
+
+            result = await manager.async_git_setup_checkout_commit(first_commit)
+
+            self.assertTrue(result["ok"], result)
+            self.assertEqual(result["step"], "restore")
+            self.assertEqual(
+                (root / "configuration.yaml").read_text(encoding="utf-8"),
+                "homeassistant:\n  name: Base\n",
+            )
+            self.assertFalse((root / "automations.yaml").exists())
+            self.assertEqual(_git(root, "rev-parse", "HEAD").stdout.strip(), latest_commit)
+            self.assertEqual(_git(root, "branch", "--show-current").stdout.strip(), "main")
+            self.assertIn("M  configuration.yaml", _git(root, "status", "--short").stdout)
+
+    async def test_git_setup_restore_commit_keeps_setup_on_current_branch(self):
         with TemporaryDirectory(dir=CONFIG_TEMP_DIR) as tmp:
             root, _remote = _create_git_repo(Path(tmp))
             first_commit = _git(root, "rev-parse", "HEAD").stdout.strip()
@@ -2861,14 +2897,43 @@ class GitReviewOperationTests(unittest.IsolatedAsyncioTestCase):
             manager = _make_manager(root)
 
             result = await manager.async_git_setup_checkout_commit(first_commit)
+            status = result["status"]
 
             self.assertTrue(result["ok"], result)
-            self.assertEqual(result["step"], "checkout")
+            self.assertEqual(status["branch"], "main")
+            self.assertTrue(status["setup_complete"], status)
+            self.assertNotIn("current branch", status["missing"])
+
+    async def test_git_setup_pull_recovers_from_detached_commit(self):
+        with TemporaryDirectory(dir=CONFIG_TEMP_DIR) as tmp:
+            root, remote = _create_git_repo(Path(tmp))
+            first_commit = _git(root, "rev-parse", "HEAD").stdout.strip()
+            upstream = Path(tmp) / "upstream"
+            subprocess.run(
+                ["git", "clone", str(remote), str(upstream)],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            _git(upstream, "config", "user.email", "ha-codex@example.test")
+            _git(upstream, "config", "user.name", "HA Codex")
+            (upstream / "configuration.yaml").write_text(
+                "homeassistant:\n  name: Pulled\n",
+                encoding="utf-8",
+            )
+            _git(upstream, "commit", "-am", "remote update")
+            _git(upstream, "push", "origin", "main")
+            manager = _make_manager(root)
+            _git(root, "checkout", first_commit)
+
+            result = await manager.async_git_setup_pull()
+
+            self.assertTrue(result["ok"], result)
+            self.assertEqual(_git(root, "branch", "--show-current").stdout.strip(), "main")
             self.assertEqual(
                 (root / "configuration.yaml").read_text(encoding="utf-8"),
-                "homeassistant:\n  name: Base\n",
+                "homeassistant:\n  name: Pulled\n",
             )
-            self.assertEqual(_git(root, "rev-parse", "HEAD").stdout.strip(), first_commit)
 
     async def test_git_setup_change_branch_recovers_from_detached_commit(self):
         with TemporaryDirectory(dir=CONFIG_TEMP_DIR) as tmp:
@@ -2880,8 +2945,7 @@ class GitReviewOperationTests(unittest.IsolatedAsyncioTestCase):
             )
             _git(root, "commit", "-am", "newer config")
             manager = _make_manager(root)
-            checkout_commit = await manager.async_git_setup_checkout_commit(first_commit)
-            self.assertTrue(checkout_commit["ok"], checkout_commit)
+            _git(root, "checkout", first_commit)
 
             result = await manager.async_git_setup_change_branch("main")
 

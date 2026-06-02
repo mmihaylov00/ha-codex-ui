@@ -95,16 +95,24 @@
       .ha-codex-root.theme-light .account-status-card,
       .ha-codex-root.theme-light .account-detail,
       .ha-codex-root.theme-light .device-login-panel,
-      .ha-codex-root.theme-light .git-setup-summary,
       .ha-codex-root.theme-light .git-setup-result,
-      .ha-codex-root.theme-light .builder-fields-simple .builder-field input,
-      .ha-codex-root.theme-light .builder-fields-simple .builder-field textarea,
       .ha-codex-root.theme-light .builder-context-chip,
       .ha-codex-root.theme-light .builder-context-empty,
       .ha-codex-root.theme-light .context-row,
       .ha-codex-root.theme-light .runtime-card,
       .ha-codex-root.theme-light .message-file-changes .diff-file {
         background: rgba(255, 255, 255, 0.72);
+      }
+      .ha-codex-root.theme-light .entity-combobox-chip {
+        background: #ffffff;
+        border-color: var(--tw-border);
+        color: var(--tw-text-strong);
+      }
+      .ha-codex-root.theme-light .entity-combobox-chip ha-icon {
+        color: var(--tw-text-strong);
+      }
+      .ha-codex-root.theme-light .entity-combobox-chip-entity-icon {
+        color: var(--tw-primary);
       }
       .ha-codex-root.theme-light .validation-output pre,
       .ha-codex-root.theme-light .markdown-body pre,
@@ -2991,27 +2999,10 @@
       .settings-git {
         align-content: start;
       }
-      .git-setup-summary {
-        align-items: center;
-        background: rgba(15, 23, 42, 0.64);
-        border: 1px solid var(--tw-border);
-        border-radius: 8px;
-        display: flex;
-        gap: 12px;
-        justify-content: space-between;
-        min-width: 0;
-        padding: 12px;
-      }
-      .git-setup-summary.success {
-        border-color: rgba(34, 197, 94, 0.44);
-      }
-      .git-setup-summary.warning {
-        border-color: rgba(245, 158, 11, 0.5);
-      }
       .git-setup-cards {
         display: grid;
         gap: 8px;
-        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
       }
       .git-setup-section {
         gap: 10px;
@@ -3035,6 +3026,31 @@
         min-width: 0;
         overflow-wrap: anywhere;
       }
+      .git-public-key-row {
+        align-items: stretch;
+        display: grid;
+        gap: 8px;
+        grid-template-columns: auto minmax(0, 1fr);
+        min-width: 0;
+      }
+      .git-public-key-row > button {
+        align-self: start;
+        white-space: nowrap;
+      }
+      .git-public-key-row .muted {
+        align-self: center;
+        color: var(--tw-muted);
+        font-size: 12px;
+        min-width: 0;
+        overflow-wrap: anywhere;
+      }
+      .git-ssh-keys-link {
+        color: var(--tw-primary);
+        font-size: 12px;
+        font-weight: 700;
+        text-decoration: none;
+        width: fit-content;
+      }
       .git-setup-action-card input,
       .git-remote-form input {
         background: var(--tw-panel-soft);
@@ -3057,6 +3073,10 @@
         justify-content: center;
         margin-top: 2px;
         width: 100%;
+      }
+      .git-remote-form button {
+        margin-top: 0;
+        width: auto;
       }
       .git-history-list {
         border: 1px solid var(--tw-border);
@@ -3156,7 +3176,7 @@
         align-items: center;
         display: grid;
         gap: 8px;
-        grid-template-columns: minmax(180px, 1fr) auto;
+        grid-template-columns: minmax(0, 1fr) auto;
         min-width: 0;
       }
       .git-remote-form input {
@@ -3313,11 +3333,6 @@
         overflow: auto;
         padding: 14px;
       }
-      .builder-scroll-simple {
-        align-content: start;
-        gap: 14px;
-        padding: 18px;
-      }
       .builder-errors {
         background: var(--tw-danger-soft);
         border: 1px solid rgba(248, 113, 113, 0.35);
@@ -3337,20 +3352,10 @@
         gap: 10px;
         grid-template-columns: repeat(2, minmax(0, 1fr));
       }
-      .builder-fields-simple {
-        gap: 14px;
-        grid-template-columns: minmax(0, 1fr);
-        margin: 0 auto;
-        max-width: 680px;
-        width: 100%;
-      }
       .builder-field {
         display: grid;
         gap: 5px;
         min-width: 0;
-      }
-      .builder-fields-simple .builder-field {
-        gap: 7px;
       }
       .builder-field.wide {
         grid-column: 1 / -1;
@@ -3380,17 +3385,6 @@
       }
       .builder-field textarea {
         min-height: 86px;
-      }
-      .builder-fields-simple .builder-field input,
-      .builder-fields-simple .builder-field textarea {
-        background: rgba(15, 23, 42, 0.78);
-        min-height: 42px;
-      }
-      .builder-fields-simple .builder-field textarea {
-        min-height: 96px;
-      }
-      .builder-fields-simple .builder-field:first-child textarea {
-        min-height: 112px;
       }
       .builder-field input:focus,
       .builder-field select:focus,
@@ -3441,14 +3435,14 @@
         border-radius: 8px;
         color: var(--tw-text);
         display: inline-flex;
-        flex: 0 1 auto;
+        flex: 1 1 180px;
         font-size: 12px;
         gap: 4px;
         justify-content: flex-start;
         line-height: 18px;
-        max-width: min(220px, 100%);
+        max-width: none;
         min-height: 28px;
-        min-width: 0;
+        min-width: min(180px, 100%);
         padding: 4px 7px;
         width: auto;
       }
@@ -3466,6 +3460,12 @@
       .entity-combobox-chip ha-icon {
         --mdc-icon-size: 14px;
         flex: 0 0 auto;
+      }
+      .entity-combobox-chip-entity-icon {
+        color: var(--tw-primary);
+      }
+      .entity-combobox-chip-remove-icon {
+        opacity: 0.78;
       }
       .entity-combobox-menu {
         background: #0f172a;
@@ -3580,11 +3580,6 @@
         display: grid;
         gap: 8px;
         padding-top: 12px;
-      }
-      .builder-scroll-simple .builder-context {
-        margin: 0 auto;
-        max-width: 680px;
-        width: 100%;
       }
       .builder-context-list {
         align-items: center;

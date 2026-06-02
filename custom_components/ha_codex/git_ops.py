@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import difflib
+from pathlib import Path
 import shlex
 import subprocess
-from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 _GIT_SETUP_KEY_NAME = "ha_codex_ed25519"
 _GIT_VISIBLE_PREFIXES = ("",)
@@ -144,8 +145,6 @@ class GitOperationsMixin:
             missing.append("git command")
         if not repository:
             missing.append("git repository")
-        if repository and not branch:
-            missing.append("current branch")
         if not remote_configured:
             missing.append("origin remote")
         if remote_uses_ssh and not ssh_key_exists:
@@ -153,7 +152,6 @@ class GitOperationsMixin:
         setup_complete = (
             git_version["ok"]
             and repository
-            and bool(branch)
             and remote_configured
             and (not remote_uses_ssh or ssh_key_exists)
         )
@@ -180,16 +178,11 @@ class GitOperationsMixin:
         }
 
     async def async_git_setup_generate_key(self) -> dict[str, Any]:
-        """Generate an SSH key pair for Git operations if one does not exist."""
+        """Generate or recreate an SSH key pair for Git operations."""
         private_key = self._git_setup_private_key_path()
         public_key = private_key.with_suffix(f"{private_key.suffix}.pub")
-        if private_key.exists() and public_key.exists():
-            return {
-                "ok": True,
-                "step": "exists",
-                "public_key": self._read_git_public_key(public_key),
-                "status": await self.async_git_setup_status(),
-            }
+        temporary_key = private_key.with_name(f".{private_key.name}.{uuid4().hex}.tmp")
+        temporary_public_key = temporary_key.with_suffix(f"{temporary_key.suffix}.pub")
 
         def prepare_directory() -> dict[str, Any]:
             try:
@@ -213,19 +206,24 @@ class GitOperationsMixin:
                 "-N",
                 "",
                 "-f",
-                str(private_key),
+                str(temporary_key),
             ],
             cwd=None,
             timeout=30,
         )
 
-        def secure_key_files() -> None:
-            if private_key.exists():
-                private_key.chmod(0o600)
-            if public_key.exists():
-                public_key.chmod(0o644)
+        def install_key_files() -> None:
+            if keygen["ok"]:
+                temporary_key.replace(private_key)
+                temporary_public_key.replace(public_key)
+            else:
+                temporary_key.unlink(missing_ok=True)
+                temporary_public_key.unlink(missing_ok=True)
+                return
+            private_key.chmod(0o600)
+            public_key.chmod(0o644)
 
-        await self.hass.async_add_executor_job(secure_key_files)
+        await self.hass.async_add_executor_job(install_key_files)
         return {
             "ok": keygen["ok"],
             "step": "generate_key",
@@ -334,7 +332,8 @@ class GitOperationsMixin:
                 "status": await self.async_git_setup_status(),
             }
 
-        branch = status["branch"] or await self._git_remote_default_branch()
+        current_branch = status["branch"]
+        branch = current_branch or await self._git_remote_default_branch()
         if not branch:
             return {
                 "ok": False,
@@ -372,6 +371,28 @@ class GitOperationsMixin:
                 "results": results,
                 "status": await self.async_git_setup_status(),
             }
+
+        if not current_branch:
+            checkout_result = await self._run_command(
+                self._git_command(["checkout", branch]),
+                cwd=None,
+                timeout=120,
+            )
+            results.append(checkout_result)
+            if not checkout_result["ok"]:
+                checkout_result = await self._run_command(
+                    self._git_command(["checkout", "-B", branch, f"origin/{branch}"]),
+                    cwd=None,
+                    timeout=120,
+                )
+                results.append(checkout_result)
+            if not checkout_result["ok"]:
+                return {
+                    "ok": False,
+                    "step": "checkout",
+                    "results": results,
+                    "status": await self.async_git_setup_status(),
+                }
 
         incoming_result = await self._run_command(
             self._git_command(["rev-list", "--count", f"HEAD..origin/{branch}"]),
@@ -461,14 +482,14 @@ class GitOperationsMixin:
         }
 
     async def async_git_setup_checkout_commit(self, commit: str) -> dict[str, Any]:
-        """Checkout a previous Git commit in the workspace."""
+        """Restore tracked workspace files from a previous Git commit."""
         safe_commit = self._safe_git_commit_ref(commit)
         status = await self.async_git_setup_status()
         if not status["repository"]:
             return {
                 "ok": False,
                 "step": "setup",
-                "stderr": "Git repository is required before checking out a commit.",
+                "stderr": "Git repository is required before restoring a commit.",
                 "status": status,
             }
 
@@ -487,15 +508,17 @@ class GitOperationsMixin:
                 "status": await self.async_git_setup_status(),
             }
 
-        checkout_result = await self._run_command(
-            self._git_command(["checkout", safe_commit]),
+        restore_result = await self._run_command(
+            self._git_command(
+                ["restore", "--source", safe_commit, "--staged", "--worktree", "--", "."]
+            ),
             cwd=None,
             timeout=120,
         )
-        results.append(checkout_result)
+        results.append(restore_result)
         return {
-            "ok": checkout_result["ok"],
-            "step": "checkout",
+            "ok": restore_result["ok"],
+            "step": "restore",
             "results": results,
             "status": await self.async_git_setup_status(),
         }

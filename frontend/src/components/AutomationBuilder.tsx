@@ -25,6 +25,7 @@ interface EntityOption {
   entityId: string;
   label: string;
   subtitle: string;
+  icon?: string;
   searchText: string;
 }
 
@@ -47,7 +48,6 @@ export function AutomationBuilder({ open, hass, contextItems, onClose, onSubmit 
   const entityOptions = useMemo(() => buildEntityOptions(hass?.states || {}), [hass?.states]);
   const serviceOptions = useMemo(() => buildServiceOptions(services), [services]);
   const notifyServiceOptions = useMemo(() => serviceOptions.filter((service) => service.domain === "notify"), [serviceOptions]);
-  const isCreateAutomation = templateId === "create_automation";
 
   useEffect(() => {
     if (!open || !hass) return;
@@ -95,15 +95,15 @@ export function AutomationBuilder({ open, hass, contextItems, onClose, onSubmit 
           setValues({});
           setSubmitted(false);
         }}>
-          <div className={`builder-scroll ${isCreateAutomation ? "builder-scroll-simple" : ""}`}>
+          <div className="builder-scroll">
             {submitted && errors.length ? (
               <div className="builder-errors" role="status">
                 {errors.map((error) => <p key={error}>{error}</p>)}
               </div>
             ) : null}
-            <div className={`builder-fields ${isCreateAutomation ? "builder-fields-simple" : ""}`}>
+            <div className="builder-fields">
               {template.fields.map((field) => (
-                <div className={`builder-field ${isCreateAutomation || field.multiline || field.control?.type === "action" ? "wide" : ""}`} key={`${template.id}:${field.id}`}>
+                <div className={`builder-field ${field.multiline || field.control?.type === "action" ? "wide" : ""}`} key={`${template.id}:${field.id}`}>
                   <span>{field.label}{field.required ? " *" : ""}</span>
                   <BuilderFieldControl
                     field={field}
@@ -443,6 +443,7 @@ function EntitySearchField({ label, placeholder, options, selector, value, onCha
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const selectedValues = splitEntityValues(value);
+  const optionByEntityId = useMemo(() => new Map(options.map((option) => [option.entityId, option])), [options]);
   const availableOptions = useMemo(() => {
     const domains = selector.domains ? new Set(selector.domains) : null;
     const selected = new Set(selector.multiple ? selectedValues : []);
@@ -485,8 +486,9 @@ function EntitySearchField({ label, placeholder, options, selector, value, onCha
                 type="button"
                 onClick={() => onChange(selectedValues.filter((item) => item !== entityId).join(", "))}
               >
+                <Icon className="entity-combobox-chip-entity-icon" icon={entityIcon(optionByEntityId.get(entityId), entityId)} />
                 <span>{entityId}</span>
-                <Icon icon="mdi:close" />
+                <Icon className="entity-combobox-chip-remove-icon" icon="mdi:close" />
               </button>
             ))}
           </div>
@@ -598,9 +600,13 @@ function ServiceSearchResults({ options, onSelect }: { options: ServiceOption[];
   return (
     <div className="entity-combobox-menu" role="listbox">
       {options.length ? options.map((option) => (
-        <button key={option.serviceId} type="button" role="option" onMouseDown={(event) => event.preventDefault()} onClick={() => onSelect(option.serviceId)}>
-          <strong>{option.label}</strong>
-          <small>{option.serviceId}</small>
+        <button className="entity-combobox-option" key={option.serviceId} type="button" role="option" onMouseDown={(event) => event.preventDefault()} onClick={() => onSelect(option.serviceId)}>
+          <Icon className="entity-combobox-option-icon" icon={serviceResultIcon(option.domain)} />
+          <span className="entity-combobox-option-main">
+            <strong>{option.label}</strong>
+            <small>{option.serviceId}</small>
+          </span>
+          <span className="entity-combobox-option-badge">{option.domain}</span>
         </button>
       )) : <div className="entity-combobox-empty">No matches</div>}
     </div>
@@ -612,7 +618,7 @@ function EntitySearchResults({ options, onSelect }: { options: EntityOption[]; o
     <div className="entity-combobox-menu" role="listbox">
       {options.length ? options.map((option) => (
         <button className="entity-combobox-option" key={option.entityId} type="button" role="option" onMouseDown={(event) => event.preventDefault()} onClick={() => onSelect(option.entityId)}>
-          <Icon className="entity-combobox-option-icon" icon={entityResultIcon(option.entityId)} />
+          <Icon className="entity-combobox-option-icon" icon={entityIcon(option, option.entityId)} />
           <span className="entity-combobox-option-main">
             <strong>{option.label}</strong>
             {option.subtitle ? <small>{option.subtitle}</small> : null}
@@ -630,8 +636,10 @@ function buildEntityOptions(states: Record<string, HassEntity>): EntityOption[] 
       const friendlyName = String(state.attributes?.friendly_name || entityId);
       const domain = entityDomain(entityId);
       const subtitle = friendlyName === entityId ? "" : entityId;
+      const icon = typeof state.attributes?.icon === "string" ? state.attributes.icon : undefined;
       return {
         entityId,
+        icon,
         label: friendlyName,
         subtitle,
         searchText: `${entityId} ${friendlyName} ${domain}`.toLowerCase(),
@@ -655,12 +663,45 @@ function buildServiceOptions(services: ServiceRegistry): ServiceOption[] {
   )).sort((a, b) => a.serviceId.localeCompare(b.serviceId));
 }
 
+function serviceResultIcon(domain: string): string {
+  switch (domain) {
+    case "automation":
+      return "mdi:robot-industrial-outline";
+    case "climate":
+      return "mdi:thermostat";
+    case "cover":
+      return "mdi:window-shutter";
+    case "fan":
+      return "mdi:fan";
+    case "homeassistant":
+      return "mdi:home-assistant";
+    case "light":
+      return "mdi:lightbulb-outline";
+    case "media_player":
+      return "mdi:play-circle-outline";
+    case "notify":
+      return "mdi:bell-outline";
+    case "scene":
+      return "mdi:palette-outline";
+    case "script":
+      return "mdi:script-text-outline";
+    case "switch":
+      return "mdi:toggle-switch-outline";
+    default:
+      return "mdi:cog-outline";
+  }
+}
+
 function splitEntityValues(value: string): string[] {
   return value.split(",").map((item) => item.trim()).filter(Boolean);
 }
 
 function entityDomain(entityId: string): string {
   return entityId.split(".")[0] || "";
+}
+
+function entityIcon(option: EntityOption | undefined, entityId: string): string {
+  return option?.icon || entityResultIcon(entityId);
 }
 
 function entityResultIcon(entityId: string): string {

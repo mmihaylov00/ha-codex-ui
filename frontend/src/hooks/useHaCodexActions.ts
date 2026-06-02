@@ -672,6 +672,7 @@ export function useHaCodexActions(api: HaCodexApi) {
           ui().setGitSetupResult(result);
           if (result.status) ui().setGitSetupStatus(result.status);
           if (!result.ok) throw new Error(gitSetupResultMessage(result, "Branch change failed"));
+          await loadGitSetupStatus(false);
           ui().showToast("Git branch changed", "success");
           await loadGitCount();
           await promptRestartHomeAssistant("Git branch changed. Restart Home Assistant Core now?");
@@ -691,10 +692,10 @@ export function useHaCodexActions(api: HaCodexApi) {
           const result = await api.gitSetupCheckoutCommit(value);
           ui().setGitSetupResult(result);
           if (result.status) ui().setGitSetupStatus(result.status);
-          if (!result.ok) throw new Error(gitSetupResultMessage(result, "Commit checkout failed"));
-          ui().showToast("Git commit checked out", "success");
+          if (!result.ok) throw new Error(gitSetupResultMessage(result, "Commit restore failed"));
+          ui().showToast("Git commit restored", "success");
           await loadGitCount();
-          await promptRestartHomeAssistant("Git commit checked out. Restart Home Assistant Core now?");
+          await promptRestartHomeAssistant("Git commit restored. Restart Home Assistant Core now?");
         } finally {
           ui().setGitSetupActionRunning(false);
         }

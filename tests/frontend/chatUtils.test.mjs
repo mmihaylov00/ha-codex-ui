@@ -191,6 +191,17 @@ test("session helpers rank busy, empty, archived, and active chats", () => {
   assert.deepEqual(sortedSessions(sessions, true).map((session) => session.id), ["new", "empty", "approval", "old"]);
 });
 
+test("new empty chats sort at the top of the current chat list", () => {
+  const approval = { status: "pending", command: "cat configuration.yaml" };
+  const sessions = [
+    { id: "older", title: "Older", status: "done", updated_at: 100, messages: [{ role: "user", created_at: 100, content: "older" }] },
+    { id: "approval", title: "Approval", status: "waiting_approval", updated_at: 300, approvals: [approval] },
+    { id: "new-empty", title: "New chat", status: "idle", created_at: 200, updated_at: 200, messages: [] },
+  ];
+
+  assert.deepEqual(sortedSessions(sessions).map((session) => session.id), ["new-empty", "approval", "older"]);
+});
+
 test("session search filters ids by chat title without changing order", () => {
   const chatsById = {
     first: { id: "first", title: "Kitchen light tune-up" },

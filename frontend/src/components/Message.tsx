@@ -171,33 +171,43 @@ const MESSAGE_FILE_CHANGE_LIMIT = 6;
 function MessageFileChanges({ api, changes }: { api: HaCodexApi; changes: GitFile[] }) {
   const [showAll, setShowAll] = useState(false);
   const [gitFiles, setGitFiles] = useState<GitFile[] | null>(null);
+  const [gitFilesVersion, setGitFilesVersion] = useState(0);
+  const changesKey = messageFileChangesKey(changes);
   useEffect(() => {
     if (!changes.length) {
       setGitFiles(null);
       return;
     }
     let canceled = false;
+    setGitFiles(null);
     void api.gitChanges()
       .then((result) => {
-        if (!canceled) setGitFiles(result.files || []);
+        if (!canceled) {
+          setGitFiles(result.files || []);
+          setGitFilesVersion((version) => version + 1);
+        }
       })
       .catch(() => {
-        if (!canceled) setGitFiles([]);
+        if (!canceled) {
+          setGitFiles([]);
+          setGitFilesVersion((version) => version + 1);
+        }
       });
     return () => {
       canceled = true;
     };
-  }, [api, changes]);
+  }, [api, changesKey]);
   if (!changes.length) return null;
   const displayChanges = enrichMessageFileChanges(changes, gitFiles);
   const visibleChanges = showAll ? displayChanges : displayChanges.slice(0, MESSAGE_FILE_CHANGE_LIMIT);
   const remainingCount = Math.max(0, displayChanges.length - visibleChanges.length);
+  const diffVersion = `${changesKey}:${gitFilesVersion}`;
   return (
     <div className="message-file-changes">
       <div className="message-file-changes-head">
         <span>{displayChanges.length} changed {displayChanges.length === 1 ? "file" : "files"}</span>
       </div>
-      {visibleChanges.map((file) => <MessageDiffFile api={api} key={`${file.old_path || ""}:${file.path}`} file={file} />)}
+      {visibleChanges.map((file) => <MessageDiffFile api={api} key={`${file.old_path || ""}:${file.path}`} file={file} version={diffVersion} />)}
       {displayChanges.length > MESSAGE_FILE_CHANGE_LIMIT ? (
         <div className="message-file-changes-toggle">
           <button type="button" className="secondary" onClick={() => setShowAll((value) => !value)}>
@@ -208,6 +218,22 @@ function MessageFileChanges({ api, changes }: { api: HaCodexApi; changes: GitFil
       ) : null}
     </div>
   );
+}
+
+function messageFileChangesKey(changes: GitFile[]): string {
+  return changes
+    .map((file) => [
+      normalizeMessageFilePath(file.old_path || ""),
+      normalizeMessageFilePath(file.path),
+      file.status || "",
+      file.code || "",
+      file.added_lines ?? "",
+      file.deleted_lines ?? "",
+      file.patch || "",
+      file.patch_error || "",
+      file.stderr || "",
+    ].join("\u0000"))
+    .join("\u0001");
 }
 
 function enrichMessageFileChanges(changes: GitFile[], gitFiles: GitFile[] | null): GitFile[] {
@@ -239,14 +265,19 @@ function isGeneratedMessageFile(path: string): boolean {
   return normalizeMessageFilePath(path).split("/").includes("dist");
 }
 
-function MessageDiffFile({ api, file }: { api: HaCodexApi; file: GitFile }) {
+function MessageDiffFile({ api, file, version }: { api: HaCodexApi; file: GitFile; version: string }) {
   const [open, setOpen] = useState(false);
   const [diff, setDiff] = useState<GitFile | null>(file.patch ? file : null);
   const [loading, setLoading] = useState(false);
   const showToast = useUiStore((state) => state.showToast);
+  const diffVersion = `${version}:${normalizedGitFileKey(file.path, file.old_path || "")}`;
   const displayFile = diff ? { ...file, ...diff, path: diff.path || file.path, old_path: diff.old_path || file.old_path } : file;
   useEffect(() => {
-    if (diff || loading) return;
+    setDiff(file.patch ? file : null);
+    setLoading(false);
+  }, [diffVersion]);
+  useEffect(() => {
+    if (!open || diff || loading) return;
     let canceled = false;
     setLoading(true);
     void api.gitFileDiff(file.path, file.old_path || "")
@@ -254,7 +285,11 @@ function MessageDiffFile({ api, file }: { api: HaCodexApi; file: GitFile }) {
         if (!canceled) setDiff(result);
       })
       .catch((error) => {
-        if (!canceled) setDiff({ ...file, patch: "", patch_error: errorSummary(error) });
+        if (!canceled) {
+          const message = errorSummary(error);
+          setDiff({ ...file, patch: "", patch_error: message });
+          showToast(`Diff load failed: ${message}`, "error");
+        }
       })
       .finally(() => {
         if (!canceled) setLoading(false);
@@ -262,20 +297,9 @@ function MessageDiffFile({ api, file }: { api: HaCodexApi; file: GitFile }) {
     return () => {
       canceled = true;
     };
-  }, [api, file.path, file.old_path]);
+  }, [api, diffVersion, open, file.path, file.old_path, showToast]);
   const toggleOpen = () => {
-    const nextOpen = !open;
-    setOpen(nextOpen);
-    if (!nextOpen || diff || loading) return;
-    setLoading(true);
-    void api.gitFileDiff(file.path, file.old_path || "")
-      .then((result) => setDiff(result))
-      .catch((error) => {
-        const message = errorSummary(error);
-        setDiff({ ...file, patch: "", patch_error: message });
-        showToast(`Diff load failed: ${message}`, "error");
-      })
-      .finally(() => setLoading(false));
+    setOpen((value) => !value);
   };
   return (
     <DiffFile

@@ -237,17 +237,25 @@ export function sessionStatusRank(session: CodexSession): number {
   return 3;
 }
 
+function isNewEmptySession(session: CodexSession, empty: boolean): boolean {
+  return empty && String(session.title || "") === "New chat";
+}
+
 export function sortedSessions(sessions: CodexSession[], archived = false): CodexSession[] {
   return [...sessions].sort((left, right) => {
+    const leftEmpty = isEmptySession(left);
+    const rightEmpty = isEmptySession(right);
     const leftMetrics = {
       activity: sessionListTime(left),
-      empty: isEmptySession(left),
+      empty: leftEmpty,
+      newEmpty: isNewEmptySession(left, leftEmpty),
       rank: sessionStatusRank(left),
       title: String(left.title || ""),
     };
     const rightMetrics = {
       activity: sessionListTime(right),
-      empty: isEmptySession(right),
+      empty: rightEmpty,
+      newEmpty: isNewEmptySession(right, rightEmpty),
       rank: sessionStatusRank(right),
       title: String(right.title || ""),
     };
@@ -256,10 +264,12 @@ export function sortedSessions(sessions: CodexSession[], archived = false): Code
       if (archivedTimeDelta !== 0) return archivedTimeDelta;
       return leftMetrics.title.localeCompare(rightMetrics.title);
     }
-    const emptyDelta = Number(leftMetrics.empty) - Number(rightMetrics.empty);
-    if (emptyDelta !== 0) return emptyDelta;
+    const newEmptyDelta = Number(rightMetrics.newEmpty) - Number(leftMetrics.newEmpty);
+    if (newEmptyDelta !== 0) return newEmptyDelta;
     const statusDelta = leftMetrics.rank - rightMetrics.rank;
     if (statusDelta !== 0) return statusDelta;
+    const emptyDelta = Number(leftMetrics.empty) - Number(rightMetrics.empty);
+    if (emptyDelta !== 0) return emptyDelta;
     const timeDelta = rightMetrics.activity - leftMetrics.activity;
     if (timeDelta !== 0) return timeDelta;
     return leftMetrics.title.localeCompare(rightMetrics.title);

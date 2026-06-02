@@ -258,57 +258,30 @@ function GitSetupTab({
 
   return (
     <div className="settings-git">
-      <section className={`git-setup-summary ${summary.tone === "success" ? "success" : "warning"}`}>
-        <div className="account-status-main">
-          <Icon icon={ready ? "mdi:source-branch-check" : "mdi:source-branch-sync"} />
-          <div>
-            <strong>{summary.title}</strong>
-            <span>{summary.detail}</span>
-          </div>
-        </div>
-        <button className="ghost" onClick={onRefresh} disabled={loading || running}>
-          <Icon icon={loading ? "mdi:progress-clock" : "mdi:refresh"} />
-          <span>{loading ? "Checking..." : "Refresh"}</span>
-        </button>
-      </section>
-
       <div className="git-setup-cards">
-        <GitSetupCard label="Git" value={status?.git_available ? "Available" : "Missing"} detail={status?.git_version || "git command"} ok={status?.git_available === true} />
-        <GitSetupCard label="Repository" value={status?.repository ? "Initialized" : "Not initialized"} detail={status?.work_tree || status?.repo_error || "Home Assistant config"} ok={status?.repository === true} />
-        <GitSetupCard label="SSH key" value={status?.ssh_key_exists ? "Created" : "Missing"} detail={status?.ssh_key_path || "/config/.ssh"} ok={status?.ssh_key_exists === true || status?.remote_uses_ssh === false} />
+        <GitSetupGitCard loading={loading} ready={ready} running={running} summary={summary} onRefresh={onRefresh} />
+        <GitSetupRepositoryCard
+          remoteDraft={remoteDraft}
+          remoteUrl={status?.remote_url || ""}
+          repoError={status?.repo_error || ""}
+          repository={status?.repository === true}
+          remoteConfigured={status?.remote_configured === true}
+          running={running}
+          onRemoteChange={setRemoteDraft}
+          onRemoteSave={onRemoteSave}
+        />
+        <GitSetupSshKeyCard
+          keyCopied={keyCopied}
+          publicKey={publicKey}
+          remoteUsesSsh={status?.remote_uses_ssh === true}
+          running={running}
+          sshKeyExists={status?.ssh_key_exists === true}
+          onCopyPublicKey={copyPublicKey}
+          onGenerateKey={onGenerateKey}
+        />
         <GitSetupBranchCard branch={branchDraft} currentBranch={status?.branch || ""} upstream={status?.upstream || ""} running={running} repository={status?.repository === true} onBranchChange={setBranchDraft} onSubmit={onBranchChange} />
         <GitSetupPullCard onPull={onPull} running={running} remoteConfigured={status?.remote_configured === true} incomingCount={status?.incoming_count || 0} />
       </div>
-
-      <section className="settings-section git-setup-section">
-        <h3>SSH key</h3>
-        <div className="git-setup-row">
-          <button onClick={onGenerateKey} disabled={running || status?.ssh_key_exists === true}>
-            <Icon icon={running ? "mdi:progress-clock" : "mdi:key-plus"} />
-            <span>{status?.ssh_key_exists ? "Key ready" : "Generate key"}</span>
-          </button>
-          <a href="https://docs.github.com/en/authentication/connecting-to-github-with-ssh/adding-a-new-ssh-key-to-your-github-account" target="_blank" rel="noreferrer">GitHub SSH keys</a>
-        </div>
-        {publicKey ? (
-          <div className={`git-public-key ${keyCopied ? "copied" : ""}`}>
-            <pre>{publicKey}</pre>
-            <button className="icon-button" onClick={copyPublicKey} title={keyCopied ? "Copied" : "Copy public key"} aria-label={keyCopied ? "Copied" : "Copy public key"}>
-              <Icon icon={keyCopied ? "mdi:check" : "mdi:content-copy"} />
-            </button>
-          </div>
-        ) : null}
-      </section>
-
-      <section className="settings-section git-setup-section">
-        <h3>Remote repository</h3>
-        <div className="git-remote-form">
-          <input value={remoteDraft} onChange={(event) => setRemoteDraft(event.currentTarget.value)} placeholder="git@github.com:owner/repository.git" aria-label="Git origin remote URL" />
-          <button onClick={() => onRemoteSave(remoteDraft)} disabled={running || !remoteDraft.trim()}>
-            <Icon icon={running ? "mdi:progress-clock" : "mdi:link-variant-plus"} />
-            <span>Save remote</span>
-          </button>
-        </div>
-      </section>
 
       <GitHistorySection history={status?.history || []} running={running} onCheckout={onCommitCheckout} />
 
@@ -319,6 +292,113 @@ function GitSetupTab({
 
 function GitSetupCard({ label, value, detail, ok }: { label: string; value: string; detail: string; ok: boolean }) {
   return <div className={`runtime-card ${ok ? "success" : "warning"}`}><span>{label}</span><strong>{value}</strong><small title={detail}>{detail}</small></div>;
+}
+
+function GitSetupGitCard({
+  loading,
+  ready,
+  running,
+  summary,
+  onRefresh,
+}: {
+  loading: boolean;
+  ready: boolean;
+  running: boolean;
+  summary: { title: string; detail: string; tone: string };
+  onRefresh: () => void;
+}) {
+  return (
+    <div className={`runtime-card git-setup-action-card ${summary.tone === "success" ? "success" : "warning"}`}>
+      <span>Git</span>
+      <strong>{summary.title}</strong>
+      <small title={summary.detail}>{summary.detail}</small>
+      <button className="ghost" onClick={onRefresh} disabled={loading || running}>
+        <Icon icon={loading ? "mdi:progress-clock" : ready ? "mdi:source-branch-check" : "mdi:refresh"} />
+        <span>{loading ? "Checking..." : "Refresh"}</span>
+      </button>
+    </div>
+  );
+}
+
+function GitSetupRepositoryCard({
+  remoteDraft,
+  remoteUrl,
+  repoError,
+  repository,
+  remoteConfigured,
+  running,
+  onRemoteChange,
+  onRemoteSave,
+}: {
+  remoteDraft: string;
+  remoteUrl: string;
+  repoError: string;
+  repository: boolean;
+  remoteConfigured: boolean;
+  running: boolean;
+  onRemoteChange: (remoteUrl: string) => void;
+  onRemoteSave: (remoteUrl: string) => void;
+}) {
+  const value = remoteConfigured ? "Remote saved" : repository ? "Initialized" : "Not initialized";
+  const detail = repoError || remoteUrl || (remoteConfigured ? "Origin remote is configured." : "Set the origin remote URL.");
+  return (
+    <div className={`runtime-card git-setup-action-card ${repository ? "success" : "warning"}`}>
+      <span>Repository</span>
+      <strong>{value}</strong>
+      <small title={detail}>{detail}</small>
+      <div className="git-remote-form">
+        <input value={remoteDraft} onChange={(event) => onRemoteChange(event.currentTarget.value)} placeholder="git@github.com:owner/repository.git" aria-label="Git origin remote URL" />
+        <button onClick={() => onRemoteSave(remoteDraft)} disabled={running || !remoteDraft.trim()}>
+          <Icon icon={running ? "mdi:progress-clock" : "mdi:link-variant-plus"} />
+          <span>Save remote</span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function GitSetupSshKeyCard({
+  keyCopied,
+  publicKey,
+  remoteUsesSsh,
+  running,
+  sshKeyExists,
+  onCopyPublicKey,
+  onGenerateKey,
+}: {
+  keyCopied: boolean;
+  publicKey: string;
+  remoteUsesSsh: boolean;
+  running: boolean;
+  sshKeyExists: boolean;
+  onCopyPublicKey: () => void;
+  onGenerateKey: () => void;
+}) {
+  const detail = publicKey ? "Public key ready to copy." : remoteUsesSsh ? "Generate a key for SSH remotes." : "Only needed for SSH remotes.";
+  return (
+    <div className={`runtime-card git-setup-action-card ${sshKeyExists || !remoteUsesSsh ? "success" : "warning"}`}>
+      <span>SSH key</span>
+      <strong>{sshKeyExists ? "Created" : "Missing"}</strong>
+      <small title={detail}>{detail}</small>
+      <div className="git-public-key-row">
+        <button onClick={onGenerateKey} disabled={running}>
+          <Icon icon={running ? "mdi:progress-clock" : sshKeyExists ? "mdi:key-change" : "mdi:key-plus"} />
+          <span>{sshKeyExists ? "Recreate key" : "Generate key"}</span>
+        </button>
+        {publicKey ? (
+          <div className={`git-public-key ${keyCopied ? "copied" : ""}`}>
+            <pre>{publicKey}</pre>
+            <button className="icon-button" onClick={onCopyPublicKey} title={keyCopied ? "Copied" : "Copy public key"} aria-label={keyCopied ? "Copied" : "Copy public key"}>
+              <Icon icon={keyCopied ? "mdi:check" : "mdi:content-copy"} />
+            </button>
+          </div>
+        ) : (
+          <span className="muted">Generate a key to show the public key.</span>
+        )}
+      </div>
+      <a className="git-ssh-keys-link" href="https://docs.github.com/en/authentication/connecting-to-github-with-ssh/adding-a-new-ssh-key-to-your-github-account" target="_blank" rel="noreferrer">GitHub SSH keys</a>
+    </div>
+  );
 }
 
 function GitSetupBranchCard({
@@ -411,8 +491,8 @@ function GitHistorySection({ history, running, onCheckout }: { history: GitCommi
                   <span title={formatTimestampTitle(commit.timestamp)}>{shortHash}{commit.timestamp ? ` · ${formatRunTime(commit.timestamp)}` : ""}</span>
                 </div>
                 <button onClick={() => onCheckout(hash)} disabled={running || !hash || current}>
-                  <Icon icon={running ? "mdi:progress-clock" : current ? "mdi:check" : "mdi:source-commit"} />
-                  <span>{current ? "Current" : "Checkout"}</span>
+                  <Icon icon={running ? "mdi:progress-clock" : current ? "mdi:check" : "mdi:restore"} />
+                  <span>{current ? "Current" : "Restore"}</span>
                 </button>
               </div>
             );

@@ -766,7 +766,7 @@ async def websocket_git_setup_checkout_commit(
     connection: ActiveConnection,
     msg: dict[str, Any],
 ) -> None:
-    """Checkout a Git commit."""
+    """Restore tracked files from a Git commit."""
     try:
         result = await _manager(hass).async_git_setup_checkout_commit(msg["commit"])
     except ValueError as err:
