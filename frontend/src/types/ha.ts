@@ -205,6 +205,7 @@ export interface GitSetupStatus {
   ssh_public_key_path?: string;
   public_key?: string;
   history?: GitCommit[];
+  incoming_count?: number;
   setup_complete?: boolean;
   missing?: string[];
 }

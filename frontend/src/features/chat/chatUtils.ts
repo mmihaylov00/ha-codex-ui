@@ -169,6 +169,24 @@ export function messageKey(message: CodexMessage, index: number): string {
   return `content:${index}:${messageDisplayKey(message)}`;
 }
 
+export function moveEditedMessageToEnd(messages: CodexMessage[], index: number): CodexMessage[] {
+  if (index < 0 || index >= messages.length - 1) return messages;
+  const moved = [...messages];
+  const [message] = moved.splice(index, 1);
+  moved.push(message);
+  return moved;
+}
+
+export function appendMessageContentDelta(messages: CodexMessage[], index: number, delta: string): CodexMessage[] {
+  if (index < 0 || index >= messages.length) return messages;
+  const updated = [...messages];
+  updated[index] = { ...updated[index], content: `${updated[index].content || ""}${delta}` };
+  if (updated[index].role === "assistant" && updated.slice(index + 1).some((message) => message.role === "event")) {
+    return moveEditedMessageToEnd(updated, index);
+  }
+  return updated;
+}
+
 export function sessionActivityTime(session: CodexSession): number {
   const updatedAt = optionalTimestamp(session.updated_at);
   if (updatedAt !== null) return updatedAt;

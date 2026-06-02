@@ -1774,6 +1774,42 @@ class SessionRunTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(exception_session.status, "error")
         self.assertIn("RuntimeError", exception_session.messages[-1].content)
 
+    async def test_run_plan_moves_edited_message_below_command_events(self):
+        manager = CodexManager(
+            _FakeHass("/tmp"),
+            store=None,
+            workspace_path="/homeassistant",
+            codex_command="codex",
+            bridge_url=None,
+            addon_write_scope=None,
+            validation_command=None,
+        )
+        manager.runner = _FakeRunner(
+            [
+                NormalizedEvent("message_delta", text="Inspecting"),
+                NormalizedEvent("action", command="ls -la /config"),
+                NormalizedEvent("message_delta", text="\nPlan ready"),
+            ]
+        )
+        manager.async_save = _async_noop
+        session = CodexSession(id="session-1", status="planning")
+        plan = {
+            "id": "plan-1",
+            "prompt": "prompt",
+            "run_prompt": "prompt",
+            "status": "planning",
+            "content": "",
+            "run_settings": {},
+        }
+        session.metadata["pending_plan"] = plan
+        manager.sessions[session.id] = session
+
+        await manager._async_run_plan(session.id, plan["id"])
+
+        self.assertEqual([message.role for message in session.messages], ["event", "assistant"])
+        self.assertEqual(session.messages[0].metadata["command"], "ls -la /config")
+        self.assertEqual(session.messages[1].content, "Inspecting\nPlan ready")
+
     async def test_stale_codex_thread_error_recovers_with_fresh_thread_prompt(self):
         stale_id = "01234567-89ab-cdef-0123-456789abcdef"
         manager = CodexManager(
@@ -2481,10 +2517,12 @@ class GitOperationsHelperTests(unittest.IsolatedAsyncioTestCase):
                 _cmd(stdout="git@example.com:owner/repo.git\n"),
                 _cmd(stdout="origin/main\n"),
                 _cmd(stdout="abc123def456\x1fabc123d\x1f1710000000\x1fInitial config\n"),
+                _cmd(stdout="2\n"),
             ]
             status = await GitOperationsMixin.async_git_setup_status(manager)
             self.assertTrue(status["repository"])
             self.assertEqual(status["remote_url"], "git@example.com:owner/repo.git")
+            self.assertEqual(status["incoming_count"], 2)
             self.assertEqual(
                 status["history"],
                 [
@@ -2788,6 +2826,28 @@ class GitReviewOperationTests(unittest.IsolatedAsyncioTestCase):
                 "homeassistant:\n  name: Base\n",
             )
             self.assertEqual(_git(root, "rev-parse", "HEAD").stdout.strip(), first_commit)
+
+    async def test_git_setup_change_branch_recovers_from_detached_commit(self):
+        with TemporaryDirectory(dir=CONFIG_TEMP_DIR) as tmp:
+            root, _remote = _create_git_repo(Path(tmp))
+            first_commit = _git(root, "rev-parse", "HEAD").stdout.strip()
+            (root / "configuration.yaml").write_text(
+                "homeassistant:\n  name: Newer\n",
+                encoding="utf-8",
+            )
+            _git(root, "commit", "-am", "newer config")
+            manager = _make_manager(root)
+            checkout_commit = await manager.async_git_setup_checkout_commit(first_commit)
+            self.assertTrue(checkout_commit["ok"], checkout_commit)
+
+            result = await manager.async_git_setup_change_branch("main")
+
+            self.assertTrue(result["ok"], result)
+            self.assertEqual(_git(root, "branch", "--show-current").stdout.strip(), "main")
+            self.assertEqual(
+                (root / "configuration.yaml").read_text(encoding="utf-8"),
+                "homeassistant:\n  name: Newer\n",
+            )
 
     async def test_commit_push_only_selected_files(self):
         with TemporaryDirectory(dir=CONFIG_TEMP_DIR) as tmp:

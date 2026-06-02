@@ -1017,6 +1017,7 @@ class CodexManager(
                         )
                         self._append_message(session, plan_message)
                     plan_message.content += event.text
+                    self._move_message_to_end_if_not_latest(session, plan_message)
                     self._fire(
                         EVENT_MESSAGE_DELTA,
                         {
@@ -1163,6 +1164,7 @@ class CodexManager(
                             assistant_message = ChatMessage(role="assistant", content="")
                             self._append_message(session, assistant_message)
                         assistant_message.content += event.text
+                        self._move_message_to_end_if_not_latest(session, assistant_message)
                         self._fire(
                             EVENT_MESSAGE_DELTA,
                             {
@@ -1707,6 +1709,20 @@ class CodexManager(
             {"session_id": session.id, "message": message.to_dict()},
         )
         return message
+
+    def _move_message_to_end_if_not_latest(
+        self,
+        session: CodexSession,
+        message: ChatMessage,
+    ) -> None:
+        """Keep resumed streamed assistant text below intervening tool activity."""
+        if not session.messages or session.messages[-1] is message:
+            return
+        for index, existing in enumerate(session.messages):
+            if existing is message:
+                session.messages.pop(index)
+                session.messages.append(message)
+                return
 
     async def _async_usage_status(self) -> dict[str, Any]:
         """Return Codex usage percentages when the runtime exposes them."""

@@ -72,6 +72,7 @@ class GitOperationsMixin:
         work_tree = ""
         repo_error = ""
         history: list[dict[str, Any]] = []
+        incoming_count = 0
 
         if git_version["ok"] and self._git_repository_marker_exists():
             repo_result = await self._run_command(
@@ -114,13 +115,24 @@ class GitOperationsMixin:
                     upstream = upstream_result["stdout"].strip()
                 history_result = await self._run_command(
                     self._git_command(
-                        ["log", "--max-count=12", "--pretty=format:%H%x1f%h%x1f%ct%x1f%s"]
+                        ["log", "--max-count=50", "--pretty=format:%H%x1f%h%x1f%ct%x1f%s"]
                     ),
                     cwd=None,
                     timeout=20,
                 )
                 if history_result["ok"]:
                     history = self._parse_git_history(history_result["stdout"])
+                if upstream:
+                    incoming_result = await self._run_command(
+                        self._git_command(["rev-list", "--count", f"HEAD..{upstream}"]),
+                        cwd=None,
+                        timeout=20,
+                    )
+                    if incoming_result["ok"]:
+                        try:
+                            incoming_count = int(incoming_result["stdout"].strip() or "0")
+                        except ValueError:
+                            incoming_count = 0
         elif git_version["ok"]:
             repo_error = "No Git repository is initialized under the Home Assistant config path."
 
@@ -162,6 +174,7 @@ class GitOperationsMixin:
             "ssh_public_key_path": str(public_key),
             "public_key": public_key_text,
             "history": history,
+            "incoming_count": incoming_count,
             "setup_complete": setup_complete,
             "missing": missing,
         }

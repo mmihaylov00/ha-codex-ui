@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import type { CodexMessage, CodexSession, ValidationResult } from "../types/ha";
 import type { QueuedMessage } from "../types/ui";
-import { currentRestartApprovals, hasPendingQuestion, hasPendingRunPlan, pendingApprovals, sortedSessions } from "../features/chat/chatUtils";
+import { appendMessageContentDelta, currentRestartApprovals, hasPendingQuestion, hasPendingRunPlan, pendingApprovals, sortedSessions } from "../features/chat/chatUtils";
 import { addContextSelection, createQueuedContextMessage, contextItemsForSend, removeContextSelection, type ContextSendPayload, type HaContextItem } from "../features/context/contextUtils";
 
 interface ChatStore {
@@ -137,14 +137,7 @@ function mergeMessages(existing: CodexMessage[], incoming: CodexMessage[]): Code
     }
     messages.push(message);
   });
-  return messages.sort((left, right) => {
-    const leftId = numericMessageId(left.id);
-    const rightId = numericMessageId(right.id);
-    if (leftId !== null && rightId !== null) return leftId - rightId;
-    if (leftId !== null) return -1;
-    if (rightId !== null) return 1;
-    return 0;
-  });
+  return messages;
 }
 
 export const useChatStore = create<ChatStore>((set, get) => ({
@@ -278,7 +271,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     if (index === -1) {
       messages.push({ id: messageId, role: "assistant", content: delta, created_at: Date.now() / 1000 });
     } else {
-      messages[index] = { ...messages[index], content: `${messages[index].content || ""}${delta}` };
+      messages.splice(0, messages.length, ...appendMessageContentDelta(messages, index, delta));
     }
     const currentLastId = Number(session.last_message_id || 0);
     const nextLastId = messageIdNumber !== null ? Math.max(currentLastId, messageIdNumber) : currentLastId;

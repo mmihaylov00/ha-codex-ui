@@ -13,6 +13,7 @@ import {
   gitStatusLabel,
   groupGitFiles,
   parsePatchLines,
+  paginateGitHistory,
   reviewableGitFileCount,
   reviewableGitFiles,
   selectedGitFiles,
@@ -101,6 +102,32 @@ test("git setup summary treats missing status as checking while loading", () => 
     tone: "success",
     title: "Git integration ready",
     detail: "Review, commit, and push controls are enabled.",
+  });
+});
+
+test("git history pagination clamps pages and reports ranges", () => {
+  const history = Array.from({ length: 12 }, (_, index) => ({ hash: `hash-${index}` }));
+
+  assert.deepEqual(paginateGitHistory(history, 0, 5), {
+    items: history.slice(0, 5),
+    page: 0,
+    pageCount: 3,
+    start: 1,
+    end: 5,
+  });
+  assert.deepEqual(paginateGitHistory(history, 5, 5), {
+    items: history.slice(10, 12),
+    page: 2,
+    pageCount: 3,
+    start: 11,
+    end: 12,
+  });
+  assert.deepEqual(paginateGitHistory([], 0, 5), {
+    items: [],
+    page: 0,
+    pageCount: 0,
+    start: 0,
+    end: 0,
   });
 });
 

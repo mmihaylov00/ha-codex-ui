@@ -108,6 +108,21 @@ export function gitSetupSummary(status: GitSetupStatus | null | undefined, loadi
   };
 }
 
+export function paginateGitHistory<T>(history: T[] = [], page = 0, pageSize = 6): { items: T[]; page: number; pageCount: number; start: number; end: number } {
+  const safePageSize = Math.max(1, Math.floor(pageSize));
+  const pageCount = history.length ? Math.ceil(history.length / safePageSize) : 0;
+  const safePage = pageCount ? Math.min(Math.max(0, Math.floor(page)), pageCount - 1) : 0;
+  const startIndex = safePage * safePageSize;
+  const items = history.slice(startIndex, startIndex + safePageSize);
+  return {
+    items,
+    page: safePage,
+    pageCount,
+    start: items.length ? startIndex + 1 : 0,
+    end: startIndex + items.length,
+  };
+}
+
 export function parsePatchLines(patch: string) {
   return String(patch || "")
     .split("\n")

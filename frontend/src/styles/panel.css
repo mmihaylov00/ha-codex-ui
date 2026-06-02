@@ -142,7 +142,6 @@
       .ha-codex-root.theme-light .builder-errors,
       .ha-codex-root.theme-light .context-errors,
       .ha-codex-root.theme-light .diff-error,
-      .ha-codex-root.theme-light .discard-confirm span,
       .ha-codex-root.theme-light .loading-state.error {
         color: #991b1b;
       }
@@ -162,7 +161,29 @@
       .ha-codex-root.theme-light .context-row.selected .context-checkbox {
         color: #ffffff;
       }
-      .ha-codex-root.theme-light button {
+      .ha-codex-root.theme-light button:not(:where(
+        .ghost,
+        .icon-button,
+        .archive-toggle,
+        .git-toggle,
+        .run-select-button,
+        .debug-button,
+        .validation-status-button,
+        .session,
+        .restart-action,
+        .context-button,
+        .builder-button,
+        .question-choice,
+        .diff-card,
+        .git-load-more,
+        .context-row,
+        .secondary,
+        .device-login-copy,
+        .scroll-to-bottom,
+        .modal-scrim,
+        .context-chip,
+        .context-clear
+      )) {
         color: #ffffff;
       }
       .ha-codex-root.theme-light button.ghost,
@@ -181,11 +202,39 @@
       .ha-codex-root.theme-light .diff-card,
       .ha-codex-root.theme-light .git-load-more,
       .ha-codex-root.theme-light .context-row,
+      .ha-codex-root.theme-light .restart-action,
+      .ha-codex-root.theme-light .run-controls > button,
+      .ha-codex-root.theme-light .scroll-to-bottom,
+      .ha-codex-root.theme-light .context-chip,
+      .ha-codex-root.theme-light .context-clear,
+      .ha-codex-root.theme-light button.secondary,
       .ha-codex-root.theme-light .entity-combobox-menu button {
         color: var(--tw-text);
       }
+      .ha-codex-root.theme-light .session {
+        color: var(--tw-text);
+      }
+      .ha-codex-root.theme-light .validation-status-button {
+        color: var(--tw-muted);
+      }
+      .ha-codex-root.theme-light .plan-mode-options button {
+        color: var(--tw-muted);
+      }
+      .ha-codex-root.theme-light .validation-status-button.success {
+        color: var(--tw-success);
+      }
+      .ha-codex-root.theme-light .validation-status-button.error {
+        color: var(--tw-danger);
+      }
+      .ha-codex-root.theme-light .validation-status-button.warning,
+      .ha-codex-root.theme-light .validation-status-button.running {
+        color: var(--tw-warning);
+      }
       .ha-codex-root.theme-light .modal-tabs button {
         color: var(--tw-muted);
+      }
+      .ha-codex-root.theme-light .plan-mode-options button.active {
+        color: var(--tw-text-strong);
       }
       .ha-codex-root.theme-light .run-select-menu button:hover,
       .ha-codex-root.theme-light .run-select-menu button.selected,
@@ -232,6 +281,17 @@
       }
       .ha-codex-root.theme-light .settings-maintenance-row > div span {
         color: var(--tw-muted);
+      }
+      .ha-codex-root.theme-light .discard-confirm-actions button.ghost {
+        color: var(--tw-text);
+      }
+      .ha-codex-root.theme-light .git-history-list {
+        background: rgba(255, 255, 255, 0.72);
+        border-color: var(--tw-border);
+      }
+      .ha-codex-root.theme-light .git-history-row {
+        background: rgba(255, 255, 255, 0.72);
+        border-color: var(--tw-border);
       }
       * {
         box-sizing: border-box;
@@ -2358,7 +2418,7 @@
         transition: transform 160ms cubic-bezier(0.2, 0, 0, 1);
       }
       .commit-box button:not(:disabled):hover ha-icon,
-      .discard-confirm button:not(:disabled):hover ha-icon {
+      .discard-confirm-actions button:not(:disabled):hover ha-icon {
         transform: scale(1.08);
       }
       .git-action-row {
@@ -2366,27 +2426,41 @@
         gap: 8px;
         grid-template-columns: repeat(2, minmax(0, 1fr));
       }
-      .discard-confirm {
-        align-items: center;
-        background: var(--tw-danger-soft);
-        border: 1px solid rgba(248, 113, 113, 0.32);
-        border-radius: 8px;
-        display: grid;
-        gap: 8px;
-        grid-template-columns: minmax(0, 1fr) auto auto;
-        padding: 8px;
+      .modal.discard-confirm-modal {
+        height: auto;
+        max-height: min(360px, calc(100vh - 44px));
+        max-width: min(420px, calc(100vw - 44px));
+        min-width: min(420px, calc(100vw - 44px));
       }
-      .discard-confirm span {
-        color: #fecaca;
-        font-size: 12px;
-        font-weight: 700;
-        line-height: 16px;
+      .discard-confirm-modal button {
+        width: auto;
+      }
+      .discard-confirm-modal .icon-button {
+        width: 32px;
+      }
+      .discard-confirm-body {
+        display: grid;
+        gap: 14px;
+        padding: 14px;
+      }
+      .discard-confirm-copy {
+        color: var(--tw-text);
+        font-size: 13px;
+        line-height: 18px;
+        margin: 0;
         min-width: 0;
         overflow-wrap: anywhere;
       }
-      .discard-confirm button {
-        min-height: 30px;
-        width: auto;
+      .discard-confirm-actions {
+        display: flex;
+        gap: 8px;
+        justify-content: flex-end;
+        min-width: 0;
+      }
+      .discard-confirm-actions button {
+        gap: 8px;
+        min-height: 34px;
+        min-width: 118px;
       }
       .git-operation-result {
         border: 1px solid var(--tw-border);
@@ -2989,6 +3063,32 @@
         border-radius: 8px;
         display: grid;
         overflow: hidden;
+      }
+      .git-history-header {
+        align-items: center;
+        display: flex;
+        gap: 10px;
+        justify-content: space-between;
+        min-width: 0;
+      }
+      .git-history-header h3 {
+        margin: 0;
+      }
+      .git-history-pager {
+        align-items: center;
+        display: flex;
+        flex: none;
+        gap: 4px;
+      }
+      .git-history-pager span {
+        color: var(--tw-muted);
+        font-size: 12px;
+        margin-right: 2px;
+      }
+      .git-history-pager .icon-button {
+        height: 28px;
+        min-height: 28px;
+        width: 28px;
       }
       .git-history-row {
         align-items: center;
@@ -3940,7 +4040,7 @@
         button:not(:disabled):not(.modal-scrim):not(.scroll-to-bottom):hover,
         .send-button:not(:disabled):hover ha-icon,
         .commit-box button:not(:disabled):hover ha-icon,
-        .discard-confirm button:not(:disabled):hover ha-icon,
+        .discard-confirm-actions button:not(:disabled):hover ha-icon,
         .modal-tabs .bridge-action:not(:disabled):hover ha-icon {
           transform: none;
         }
@@ -4016,10 +4116,14 @@
           grid-column: 2 / -1;
           justify-content: flex-start;
         }
-        .git-action-row, .discard-confirm {
+        .git-action-row {
           grid-template-columns: minmax(0, 1fr);
         }
-        .discard-confirm button {
+        .discard-confirm-actions {
+          display: grid;
+          grid-template-columns: minmax(0, 1fr);
+        }
+        .discard-confirm-actions button {
           width: 100%;
         }
         .diff-lines {

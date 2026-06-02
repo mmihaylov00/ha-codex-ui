@@ -204,14 +204,53 @@ function CommitBox({ onCommit, onDiscard }: { onCommit: (message: string) => voi
         <button type="button" className="danger" disabled={discardDisabled} onClick={() => setConfirmingDiscard(true)}><Icon icon="mdi:trash-can-outline" /><span>Discard selected</span></button>
       </div>
       {confirmingDiscard && selectedCount ? (
-        <div className="discard-confirm">
-          <span>Discard {selectedCount} selected {selectedCount === 1 ? "file" : "files"}?</span>
-          <button type="button" className="danger" disabled={discardRunning} onClick={onDiscard}><Icon icon={discardRunning ? "mdi:progress-clock" : "mdi:check"} /><span>{discardRunning ? "Discarding..." : "Confirm discard"}</span></button>
-          <button type="button" className="ghost" disabled={discardRunning} onClick={() => setConfirmingDiscard(false)}>Cancel</button>
-        </div>
+        <DiscardConfirmModal
+          count={selectedCount}
+          running={discardRunning}
+          onCancel={() => setConfirmingDiscard(false)}
+          onDiscard={onDiscard}
+        />
       ) : null}
       <GitOperationResult />
     </form>
+  );
+}
+
+function DiscardConfirmModal({
+  count,
+  running,
+  onCancel,
+  onDiscard,
+}: {
+  count: number;
+  running: boolean;
+  onCancel: () => void;
+  onDiscard: () => void;
+}) {
+  return (
+    <div className="modal-backdrop discard-confirm-backdrop" role="presentation">
+      <button
+        className="modal-scrim"
+        type="button"
+        onClick={running ? undefined : onCancel}
+        aria-label="Cancel discard"
+      />
+      <section className="modal discard-confirm-modal" role="dialog" aria-modal="true" aria-labelledby="discard-confirm-title">
+        <header className="modal-header">
+          <h2 id="discard-confirm-title">Discard selected changes?</h2>
+          <button className="icon-button" type="button" onClick={onCancel} disabled={running} aria-label="Cancel discard"><Icon icon="mdi:close" /></button>
+        </header>
+        <div className="discard-confirm-body">
+          <p className="discard-confirm-copy">
+            This will discard {count} selected {count === 1 ? "file" : "files"}. Tracked files will be restored and untracked files will be removed.
+          </p>
+          <div className="discard-confirm-actions">
+            <button type="button" className="ghost" disabled={running} onClick={onCancel}>Cancel</button>
+            <button type="button" className="danger" disabled={running} onClick={onDiscard}><Icon icon={running ? "mdi:progress-clock" : "mdi:trash-can-outline"} /><span>{running ? "Discarding..." : "Confirm discard"}</span></button>
+          </div>
+        </div>
+      </section>
+    </div>
   );
 }
 

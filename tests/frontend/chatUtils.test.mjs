@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  appendMessageContentDelta,
   canContainQuestion,
   currentQuestion,
   currentQuestionFromMessages,
@@ -15,6 +16,7 @@ import {
   isRestartApproval,
   isSessionBusy,
   messageKey,
+  moveEditedMessageToEnd,
   pendingApprovals,
   sortedSessions,
   stripDuplicateFileChangesBlock,
@@ -152,6 +154,21 @@ test("message visibility and keys remove restart noise and adjacent duplicates",
   assert.equal(messageKey(messages[3], 3), "id:10");
   assert.equal(messageKey({ role: "assistant", created_at: 99, metadata: { kind: "run" } }, 4), "created:99:assistant:run");
   assert.match(messageKey({ role: "assistant", content: "hello" }, 5), /^content:5:/);
+});
+
+test("edited assistant messages move below newer command messages", () => {
+  const messages = [
+    { id: 1, role: "assistant", content: "Inspecting" },
+    { id: 2, role: "event", content: "```\nls -la\n```", metadata: { kind: "action", command: "ls -la" } },
+    { id: 3, role: "event", content: "command output", metadata: { kind: "action_output" } },
+  ];
+
+  const moved = appendMessageContentDelta(messages, 0, "\nDone.");
+
+  assert.deepEqual(moved.map((message) => message.id), [2, 3, 1]);
+  assert.equal(moved[2].content, "Inspecting\nDone.");
+  assert.notEqual(moved, messages);
+  assert.deepEqual(moveEditedMessageToEnd(messages, 0).map((message) => message.id), [2, 3, 1]);
 });
 
 test("session helpers rank busy, empty, archived, and active chats", () => {

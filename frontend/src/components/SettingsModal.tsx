@@ -4,7 +4,7 @@ import { useUiStore } from "../stores/uiStore";
 import { useChatStore } from "../stores/chatStore";
 import type { GitCommit, GitSetupResult, HaCodexSettings, ModelPreset, RunSettings } from "../types/ha";
 import type { SettingsTab } from "../types/ui";
-import { gitSetupSummary, isGitSetupReady } from "../features/git/gitUtils";
+import { gitSetupSummary, isGitSetupReady, paginateGitHistory } from "../features/git/gitUtils";
 import { BUILT_IN_MODEL_PRESET_IDS, deleteModelPreset, presetIdFromLabel, upsertModelPreset } from "../features/settings/runtimeSettingsUtils";
 import { copyText, formatDuration, formatRunTime, formatTimestampTitle, stripAnsi } from "../utils/format";
 
@@ -231,7 +231,7 @@ function GitSetupTab({
   const summary = gitSetupSummary(status, loading);
   const publicKey = status?.public_key || result?.public_key || "";
   const [remoteDraft, setRemoteDraft] = useState(status?.remote_url || "");
-  const [branchDraft, setBranchDraft] = useState(status?.branch || "");
+  const [branchDraft, setBranchDraft] = useState(status?.branch || "main");
   const [keyCopied, setKeyCopied] = useState(false);
 
   useLayoutEffect(() => {
@@ -239,8 +239,14 @@ function GitSetupTab({
   }, [status?.remote_url]);
 
   useLayoutEffect(() => {
-    setBranchDraft(status?.branch || "");
-  }, [status?.branch]);
+    if (!status?.repository) {
+      setBranchDraft("");
+    } else if (status.branch) {
+      setBranchDraft(status.branch);
+    } else {
+      setBranchDraft((current) => current.trim() || "main");
+    }
+  }, [status?.branch, status?.repository]);
 
   const copyPublicKey = async () => {
     if (!publicKey) return;
@@ -271,7 +277,7 @@ function GitSetupTab({
         <GitSetupCard label="Repository" value={status?.repository ? "Initialized" : "Not initialized"} detail={status?.work_tree || status?.repo_error || "Home Assistant config"} ok={status?.repository === true} />
         <GitSetupCard label="SSH key" value={status?.ssh_key_exists ? "Created" : "Missing"} detail={status?.ssh_key_path || "/config/.ssh"} ok={status?.ssh_key_exists === true || status?.remote_uses_ssh === false} />
         <GitSetupBranchCard branch={branchDraft} currentBranch={status?.branch || ""} upstream={status?.upstream || ""} running={running} repository={status?.repository === true} onBranchChange={setBranchDraft} onSubmit={onBranchChange} />
-        <GitSetupPullCard onPull={onPull} running={running} remoteConfigured={status?.remote_configured === true} />
+        <GitSetupPullCard onPull={onPull} running={running} remoteConfigured={status?.remote_configured === true} incomingCount={status?.incoming_count || 0} />
       </div>
 
       <section className="settings-section git-setup-section">
@@ -345,38 +351,59 @@ function GitSetupBranchCard({
     >
       <span>Branch</span>
       <input value={branch} onChange={(event) => onBranchChange(event.currentTarget.value)} placeholder="main" aria-label="Git branch name" />
+      <small title={detail}>{detail}</small>
       <button type="submit" disabled={running || !repository || !value || unchanged}>
         <Icon icon={running ? "mdi:progress-clock" : "mdi:source-branch"} />
         Checkout
       </button>
-      <small title={detail}>{detail}</small>
     </form>
   );
 }
 
-function GitSetupPullCard({ onPull, running, remoteConfigured }: { onPull: () => void; running: boolean; remoteConfigured: boolean }) {
+function GitSetupPullCard({ onPull, running, remoteConfigured, incomingCount }: { onPull: () => void; running: boolean; remoteConfigured: boolean; incomingCount: number }) {
+  const label = incomingCount > 0 ? `Pull ${incomingCount} incoming ${incomingCount === 1 ? "commit" : "commits"}` : "Pull";
   return (
     <div className={`runtime-card git-setup-action-card ${remoteConfigured ? "success" : "warning"}`}>
       <span>Pull</span>
       <strong>{remoteConfigured ? "Ready" : "Unavailable"}</strong>
       <button onClick={onPull} disabled={running || !remoteConfigured}>
         <Icon icon={running ? "mdi:progress-clock" : "mdi:source-pull"} />
-        Pull from origin
+        {label}
       </button>
     </div>
   );
 }
 
 function GitHistorySection({ history, running, onCheckout }: { history: GitCommit[]; running: boolean; onCheckout: (commit: string) => void }) {
+  const [page, setPage] = useState(0);
+  const paged = paginateGitHistory(history, page, 6);
+
+  useLayoutEffect(() => {
+    setPage((current) => paginateGitHistory(history, current, 6).page);
+  }, [history]);
+
   return (
     <section className="settings-section git-setup-section git-history-section">
-      <h3>History</h3>
+      <div className="git-history-header">
+        <h3>History</h3>
+        {paged.pageCount > 1 ? (
+          <div className="git-history-pager">
+            <span>{paged.start}-{paged.end} of {history.length}</span>
+            <button className="icon-button" onClick={() => setPage((value) => value - 1)} disabled={paged.page === 0} title="Previous commits" aria-label="Previous commits">
+              <Icon icon="mdi:chevron-left" />
+            </button>
+            <button className="icon-button" onClick={() => setPage((value) => value + 1)} disabled={paged.page >= paged.pageCount - 1} title="Next commits" aria-label="Next commits">
+              <Icon icon="mdi:chevron-right" />
+            </button>
+          </div>
+        ) : null}
+      </div>
       {history.length ? (
         <div className="git-history-list">
-          {history.map((commit, index) => {
+          {paged.items.map((commit, index) => {
             const hash = commit.hash || commit.short_hash || "";
             const shortHash = commit.short_hash || hash.slice(0, 7);
-            const current = index === 0;
+            const current = paged.start + index === 1;
             return (
               <div className="git-history-row" key={hash || index}>
                 <div className="git-history-main">
