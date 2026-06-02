@@ -42,6 +42,6 @@ jobs:
           unzip -l ha_codex.zip manifest.json frontend/panel.js bridge/ha_codex_bridge.py brand/icon.png
 
       - name: Upload release package
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: ha_codex.zip
