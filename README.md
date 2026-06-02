@@ -8,7 +8,9 @@
 
 HA Codex UI is a Home Assistant custom integration that adds an admin-only Codex
 sidebar panel for inspecting configuration, chatting with Codex, reviewing file
-changes, handling approvals, and running Home Assistant validation.
+changes, handling approvals, and running Home Assistant validation. Use it for
+generating and iterating on (vibecoding) automations, dashboards, scripts,
+scenes, YAML, and other configurable parts of Home Assistant.
 
 This integration can execute commands and edit files in your Home Assistant
 configuration. Keep `require_admin: true`, review approval prompts carefully, and
