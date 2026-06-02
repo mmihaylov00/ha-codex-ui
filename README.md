@@ -10,6 +10,13 @@ install it only on Home Assistant instances you control.
 
 ![HA Codex UI running in Home Assistant](docs/assets/codex-working.png)
 
+## Open Source
+
+HA Codex UI is open source under the Apache-2.0 license. You can use, modify,
+and share the integration for personal or commercial Home Assistant setups under
+the license terms. Contributions, bug reports, documentation improvements, and
+feature ideas are welcome.
+
 ## Features
 
 - **Codex inside Home Assistant**: adds an admin-only **Codex** sidebar panel for
