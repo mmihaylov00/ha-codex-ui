@@ -30,8 +30,11 @@ from custom_components.ha_codex.validation_lab import (
     reload_service_for_domain,
 )
 
-CONFIG_TEMP_DIR = None
 REPO_ROOT = Path(__file__).resolve().parents[1]
+# Avoid the OS temp root because the integration intentionally ignores paths
+# containing a "tmp" segment when scanning user-visible workspace files.
+CONFIG_TEMP_DIR = REPO_ROOT / "test_workspaces"
+CONFIG_TEMP_DIR.mkdir(exist_ok=True)
 BRIDGE_PATH = REPO_ROOT / "custom_components" / "ha_codex" / "bridge" / "ha_codex_bridge.py"
 
 
