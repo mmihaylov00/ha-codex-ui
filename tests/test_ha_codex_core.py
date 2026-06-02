@@ -2242,6 +2242,12 @@ def _create_git_repo(parent: Path) -> tuple[Path, Path]:
     )
     _git(root, "remote", "add", "origin", str(remote))
     _git(root, "push", "-u", "origin", "main")
+    subprocess.run(
+        ["git", "--git-dir", str(remote), "symbolic-ref", "HEAD", "refs/heads/main"],
+        text=True,
+        capture_output=True,
+        check=True,
+    )
     return root, remote
 
 
