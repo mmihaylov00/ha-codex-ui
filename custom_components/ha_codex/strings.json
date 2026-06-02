@@ -1,0 +1,37 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "HA Codex UI",
+        "description": "Set up the Codex sidebar panel. The defaults work for most Home Assistant OS installs.",
+        "data": {
+          "workspace_path": "Workspace path",
+          "codex_command": "Codex command",
+          "bridge_url": "Bridge URL",
+          "require_admin": "Require administrator",
+          "addon_write_scope": "Add-on write scope",
+          "validation_command": "Validation command"
+        }
+      }
+    },
+    "abort": {
+      "already_configured": "HA Codex UI is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "HA Codex UI options",
+        "description": "Update the Codex runtime paths and safety settings.",
+        "data": {
+          "workspace_path": "Workspace path",
+          "codex_command": "Codex command",
+          "bridge_url": "Bridge URL",
+          "require_admin": "Require administrator",
+          "addon_write_scope": "Add-on write scope",
+          "validation_command": "Validation command"
+        }
+      }
+    }
+  }
+}

@@ -12,6 +12,11 @@ from custom_components.ha_codex.capabilities import (
     discover_validation_command,
 )
 from custom_components.ha_codex.codex_events import NormalizedEvent, normalize_event
+from custom_components.ha_codex.config_flow import (
+    config_defaults,
+    config_from_entry_data,
+    normalize_config_input,
+)
 from custom_components.ha_codex.manager import CodexManager, summarize_prompt_title
 from custom_components.ha_codex.models import (
     ChatMessage,
@@ -74,6 +79,52 @@ class CapabilityDiscoveryTests(unittest.TestCase):
             )
 
         self.assertEqual(paths, [str(root / "addons"), str(root / "addon_configs")])
+
+
+class ConfigEntryTests(unittest.TestCase):
+    def test_manifest_enables_config_flow(self):
+        manifest = json.loads(
+            (REPO_ROOT / "custom_components" / "ha_codex" / "manifest.json").read_text(
+                encoding="utf-8"
+            )
+        )
+
+        self.assertEqual(manifest["name"], "HA Codex UI")
+        self.assertEqual(manifest["config_flow"], True)
+
+    def test_config_flow_defaults_match_hacs_install_values(self):
+        defaults = config_defaults()
+
+        self.assertEqual(defaults["workspace_path"], "/config")
+        self.assertEqual(defaults["codex_command"], "/config/bin/codex")
+        self.assertEqual(defaults["bridge_url"], "http://127.0.0.1:8765")
+        self.assertTrue(defaults["require_admin"])
+        self.assertEqual(defaults["addon_write_scope"], "all_visible")
+        self.assertEqual(defaults["validation_command"], "auto")
+
+    def test_yaml_import_normalizes_blank_optional_values(self):
+        data = normalize_config_input(
+            {
+                "workspace_path": "/config",
+                "codex_command": "/config/bin/codex",
+                "bridge_url": "",
+                "require_admin": True,
+                "addon_write_scope": "",
+                "validation_command": "",
+            }
+        )
+
+        self.assertEqual(data["bridge_url"], None)
+        self.assertEqual(data["addon_write_scope"], None)
+        self.assertEqual(data["validation_command"], None)
+
+    def test_options_override_config_entry_data(self):
+        data = normalize_config_input({"codex_command": "/config/bin/codex"})
+        merged = config_from_entry_data(data, {"codex_command": "codex", "require_admin": False})
+
+        self.assertEqual(merged["workspace_path"], "/config")
+        self.assertEqual(merged["codex_command"], "codex")
+        self.assertFalse(merged["require_admin"])
 
 
 class BridgeAccountTests(unittest.TestCase):

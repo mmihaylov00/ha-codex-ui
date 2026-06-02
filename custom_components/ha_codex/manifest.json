@@ -1,7 +1,8 @@
 {
   "domain": "ha_codex",
-  "name": "HA Codex",
+  "name": "HA Codex UI",
   "codeowners": ["@mmihaylov00"],
+  "config_flow": true,
   "dependencies": ["frontend", "http", "panel_custom", "websocket_api"],
   "documentation": "https://github.com/mmihaylov00/ha-codex-ui",
   "integration_type": "service",

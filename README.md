@@ -15,6 +15,9 @@ install it only on Home Assistant instances you control.
 - **Admin-only Home Assistant sidebar panel**: adds a **Codex** panel inside
   Home Assistant and can restrict access to Home Assistant administrators with
   `require_admin: true`.
+- **UI-based setup and options**: configure the integration from
+  **Settings > Devices & services**, then edit the same options later from the
+  integration's **Configure** action.
 - **Persistent Codex chat sessions**: create, rename, archive, restore, retry,
   and continue Codex sessions from the sidebar.
 - **Streaming Codex runs**: streams Codex responses, tool activity, command
@@ -117,10 +120,32 @@ repository:
 4. Select category **Integration**.
 5. Download **HA Codex UI**.
 6. Restart Home Assistant Core.
+7. Open **Settings > Devices & services**.
+8. Select **Add integration**.
+9. Search for **HA Codex UI**.
+10. Confirm or adjust the default options.
 
 ## Configuration
 
-Add the integration to `configuration.yaml`:
+The preferred setup path is the Home Assistant UI. After HACS installs the
+integration and Home Assistant restarts, add **HA Codex UI** from
+**Settings > Devices & services**. The setup form is prefilled with these
+defaults:
+
+| Option | Default | Purpose |
+| --- | --- | --- |
+| `workspace_path` | `/config` | Directory where Codex runs. |
+| `require_admin` | `true` | Restricts the sidebar panel to Home Assistant administrators. |
+| `codex_command` | `/config/bin/codex` | Codex CLI executable or absolute path. |
+| `bridge_url` | `http://127.0.0.1:8765` | Local bridge URL. |
+| `addon_write_scope` | `all_visible` | Extra add-on paths exposed to Codex when present. |
+| `validation_command` | `auto` | Uses `ha core check` or `hass --script check_config` when available. |
+
+To edit these later, open **Settings > Devices & services**, select
+**HA Codex UI**, and choose **Configure**.
+
+YAML configuration remains supported for existing installs and is imported into
+a Home Assistant config entry when possible:
 
 ```yaml
 ha_codex:
@@ -132,14 +157,14 @@ ha_codex:
   validation_command: auto
 ```
 
-Restart Home Assistant Core after changing this YAML:
+Restart Home Assistant Core after changing YAML:
 
 ```sh
 ha core restart
 ```
 
 The sidebar panel appears as **Codex** for administrators after Home Assistant
-loads the integration.
+loads the configured integration.
 
 ## Codex CLI
 
@@ -219,17 +244,6 @@ from:
 
 Legacy helper scripts under `/config/bin` or `/homeassistant/bin` remain
 supported as a fallback for existing local installs.
-
-## Options
-
-| Option | Default | Purpose |
-| --- | --- | --- |
-| `workspace_path` | `/homeassistant` | Directory where Codex runs. Use `/config` on Home Assistant OS. |
-| `require_admin` | `true` | Restricts the sidebar panel to Home Assistant administrators. |
-| `codex_command` | `codex` | Codex CLI executable or absolute path. |
-| `bridge_url` | `null` | Local bridge URL. Recommended: `http://127.0.0.1:8765`. |
-| `addon_write_scope` | `all_visible` | Extra add-on paths exposed to Codex when present. |
-| `validation_command` | `auto` | Uses `ha core check` or `hass --script check_config` when available. |
 
 ## Troubleshooting
 
