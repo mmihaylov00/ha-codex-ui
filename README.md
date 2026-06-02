@@ -49,8 +49,8 @@ Before installing HA Codex UI, make sure you have:
   [HACS](https://www.hacs.xyz/docs/use/download/download/).
 - **Terminal access to Home Assistant**: the installation below uses a shell
   that can access `/config`.
-- **Node.js and npm**: the Codex CLI is installed with npm. The installation
-  below shows where to check or install them.
+- **Download tools**: the recommended Codex CLI install uses `curl` and `sh` in
+  the Home Assistant terminal.
 - **Codex access**: use an OpenAI or ChatGPT account with Codex access enabled.
 - **Optional Git integration requirements**: to use the Git setup page, your
   Home Assistant shell also needs `git`, `ssh-keygen`, network access to your Git
@@ -63,7 +63,6 @@ Follow these steps in order. The commands and UI values use the default HA Codex
 UI paths:
 
 - Codex CLI executable: `/config/bin/codex`
-- Optional Node.js executable for bridge runs: `/config/bin/node`
 - Codex credentials: `/config/codex_home`
 - Workspace path: `/config`
 - Bridge URL: `http://127.0.0.1:8765`
@@ -93,62 +92,55 @@ Codex CLI. The simplest path is Advanced SSH & Web Terminal:
 cd /config
 ```
 
-### 2. Check Node.js and npm
+### 2. Check terminal download tools
 
-The Codex CLI is installed with npm and needs a Node.js runtime when HA Codex UI
-runs it. Check the terminal first:
+The recommended Codex CLI install uses the standalone installer from OpenAI's
+Codex CLI docs. Check that `curl` is available:
 
 ```sh
-node --version
-npm --version
+curl --version
 ```
 
-If both commands print versions, continue to the next step.
-
-If either command is missing in Advanced SSH & Web Terminal, install Node.js and
-npm in that terminal app/add-on:
+If `curl` is missing in Advanced SSH & Web Terminal, install it in that terminal
+app/add-on:
 
 1. Open the **Advanced SSH & Web Terminal** app/add-on page.
 2. Open **Configuration**.
-3. Add these custom Alpine packages if your version exposes a package list:
-   `nodejs` and `npm`.
+3. Add `curl` to the custom Alpine packages if your version exposes a package
+   list.
 4. Save the configuration.
 5. Restart the app/add-on.
 6. Open the web terminal again and run:
 
 ```sh
-node --version
-npm --version
+curl --version
 ```
-
-For non-Home Assistant OS installs, use the official
-[Node.js downloads](https://nodejs.org/en/download) or npm's
-[Node.js and npm install guide](https://docs.npmjs.com/downloading-and-installing-node-js-and-npm/).
 
 ### 3. Install the Codex CLI at `/config/bin/codex`
 
-HA Codex UI does not bundle the Codex CLI or credentials. Install the CLI into
-`/config/bin/codex`, which is the default value used by the integration option
-`codex_command`.
+HA Codex UI does not bundle the Codex CLI or credentials. Install Codex with the
+standalone installer, then copy the installed binary to `/config/bin/codex`.
+That path is the default value used by the integration option `codex_command`.
 
 ```sh
-mkdir -p /config/bin /config/codex-cli
-npm install --global --prefix /config/codex-cli @openai/codex
-ln -sf /config/codex-cli/bin/codex /config/bin/codex
+mkdir -p /config/bin
+curl -fsSL https://chatgpt.com/codex/install.sh | CODEX_NON_INTERACTIVE=1 sh
+CODEX_INSTALLED="${HOME}/.local/bin/codex"
+if [ ! -x "$CODEX_INSTALLED" ]; then
+  CODEX_INSTALLED="$(command -v codex || true)"
+fi
+test -x "$CODEX_INSTALLED"
+if [ "$CODEX_INSTALLED" != "/config/bin/codex" ]; then
+  cp "$CODEX_INSTALLED" /config/bin/codex
+  chmod 0755 /config/bin/codex
+fi
 /config/bin/codex --version
 ```
 
 OpenAI's official Codex CLI setup is documented in the
 [Codex CLI getting started guide](https://developers.openai.com/codex/cli#cli-setup).
-
-The HA Codex bridge prepends `/config/bin` to `PATH` before running Codex. If the
-HA Codex diagnostics later say that `node` cannot be found, place a working
-Node.js executable at `/config/bin/node` and verify it:
-
-```sh
-/config/bin/node --version
-/config/bin/codex --version
-```
+The same installer can be rerun later to upgrade Codex; after upgrading, copy the
+new binary to `/config/bin/codex` again.
 
 If you install Codex somewhere else, write down that executable path. You must
 set it later in **Settings > Devices & services > HA Codex UI > Configure** as
@@ -239,7 +231,6 @@ the important values are created or edited:
 | --- | --- | --- |
 | HACS repository | **HACS > Custom repositories** | `https://github.com/mmihaylov00/ha-codex-ui`, category **Integration** |
 | Codex CLI install path | Home Assistant terminal, installation step 3 | `/config/bin/codex` |
-| Node.js executable, if needed | Home Assistant terminal | `/config/bin/node` |
 | Integration options | **Settings > Devices & services > HA Codex UI > Configure** | See the table below |
 | Codex credentials | **Codex > Settings > Account** | `/config/codex_home` |
 | Git remote and SSH key | **Codex > Settings > Git** | Set only if you want Git review, commit, and push controls |
