@@ -15,9 +15,11 @@ scenes, YAML, and other configurable parts of Home Assistant.
 After the initial version, HA Codex UI itself has been built directly inside
 Home Assistant using this workflow.
 
-This integration can execute commands and edit files in your Home Assistant
-configuration. Keep `require_admin: true`, review approval prompts carefully, and
-install it only on Home Assistant instances you control.
+This is a development tool. It can execute commands and edit files in your Home
+Assistant configuration, which means a wrong prompt, approval, command, or model
+output can damage files and break Home Assistant. Keep `require_admin: true`,
+review approval prompts carefully, keep current backups while working with it,
+and install it only on Home Assistant instances you control.
 
 ![HA Codex UI running in Home Assistant](docs/assets/codex-working.png)
 
