@@ -3,12 +3,12 @@ import type { HaCodexApi } from "../services/api";
 import { useChatStore } from "../stores/chatStore";
 import { useUiStore } from "../stores/uiStore";
 import { errorSummary, stripAnsi } from "../utils/format";
-import { gitStatusLabel, gitFileKey, reviewableGitFileCount, reviewableGitFiles, selectedGitFiles } from "../features/git/gitUtils";
+import { gitStatusLabel, gitFileKey, isGitSetupReady, reviewableGitFileCount, reviewableGitFiles, selectedGitFiles } from "../features/git/gitUtils";
 import { hasPendingQuestion, hasPendingRestart, hasPendingRunPlan, isSessionBusy, pendingApprovals } from "../features/chat/chatUtils";
 import { buildContextSendPayload, contextAttachmentsFromItems, shouldClearContextAfterSend, type ContextSendPayload, type HaContextItem } from "../features/context/contextUtils";
 import { runPlanRevisePrompt } from "../features/runPlan/runPlanUtils";
 import { normalizeHaCodexSettings, normalizeRunSettings } from "../features/settings/runtimeSettingsUtils";
-import type { CodexMessage, CodexSession, GitChanges, HaCodexSettings, RunSettings } from "../types/ha";
+import type { CodexMessage, CodexSession, GitChanges, GitSetupResult, HaCodexSettings, RunSettings } from "../types/ha";
 
 function localSessionId() {
   if (window.crypto?.randomUUID) return `local-${window.crypto.randomUUID()}`;
@@ -16,6 +16,11 @@ function localSessionId() {
 }
 
 function gitOperationFailureMessage(result: GitChanges, fallback: string): string {
+  const failed = result.results?.find((item) => item.ok === false);
+  return stripAnsi([failed?.stdout, failed?.stderr, result.stdout, result.stderr].filter(Boolean).join("\n")).trim() || fallback;
+}
+
+function gitSetupResultMessage(result: GitSetupResult, fallback: string): string {
   const failed = result.results?.find((item) => item.ok === false);
   return stripAnsi([failed?.stdout, failed?.stderr, result.stdout, result.stderr].filter(Boolean).join("\n")).trim() || fallback;
 }
@@ -144,7 +149,33 @@ export function useHaCodexActions(api: HaCodexApi) {
       }
     };
 
+    const loadGitSetupStatus = async (loading = true) => {
+      if (loading) ui().setGitSetupLoading(true);
+      try {
+        const status = await api.gitSetupStatus();
+        ui().setGitSetupStatus(status);
+        if (!isGitSetupReady(status)) {
+          ui().setGitPanelOpen(false);
+          ui().setGitChangedCount(0);
+          ui().setGitChanges(null);
+        }
+        return status;
+      } catch (error) {
+        const status = { ok: false, setup_complete: false, missing: ["setup status"], repo_error: errorSummary(error) };
+        ui().setGitSetupStatus(status);
+        ui().setGitPanelOpen(false);
+        ui().setGitChangedCount(0);
+        return status;
+      } finally {
+        if (loading) ui().setGitSetupLoading(false);
+      }
+    };
+
     const loadGitCount = async () => {
+      if (!isGitSetupReady(ui().gitSetupStatus)) {
+        ui().setGitChangedCount(0);
+        return;
+      }
       try {
         const status = await api.gitStatus();
         const files = stripAnsi(status.stdout || "")
@@ -159,6 +190,13 @@ export function useHaCodexActions(api: HaCodexApi) {
 
     const loadGitChanges = async (toast = true) => {
       if (ui().gitLoading) return;
+      if (!isGitSetupReady(ui().gitSetupStatus)) {
+        ui().setGitPanelOpen(false);
+        ui().setGitChanges(null);
+        ui().setGitChangedCount(0);
+        if (toast) ui().showToast("Set up Git in Settings before reviewing changes", "error");
+        return;
+      }
       ui().setGitLoading(true);
       try {
         let changes: GitChanges;
@@ -310,7 +348,7 @@ export function useHaCodexActions(api: HaCodexApi) {
 
     return {
       loadInitial: async () => {
-        await Promise.all([loadSessions(), loadStatus(), loadSettings(), loadAccountStatus()]);
+        await Promise.all([loadSessions(), loadStatus(), loadSettings(), loadAccountStatus(), loadGitSetupStatus(false)]);
         await loadGitCount();
       },
       loadSessions,
@@ -319,6 +357,7 @@ export function useHaCodexActions(api: HaCodexApi) {
       loadSettings,
       loadBridgeLog,
       clearBridgeLog,
+      loadGitSetupStatus,
       loadGitChanges,
       createSession,
       sendPrompt,
@@ -435,7 +474,7 @@ export function useHaCodexActions(api: HaCodexApi) {
       rollbackRun: async (sessionId: string, checkpointId: string) => {
         const result = await api.rollbackRun(sessionId, checkpointId);
         await loadSessions();
-        await loadGitChanges(false);
+        if (isGitSetupReady(ui().gitSetupStatus)) await loadGitChanges(false);
         if (!result.ok) {
           ui().showToast(result.reason || "Rollback needs manual review", "error");
           return;
@@ -475,9 +514,64 @@ export function useHaCodexActions(api: HaCodexApi) {
         chat().upsertSession(result.session);
       },
       toggleGitPanel: async () => {
+        if (!isGitSetupReady(ui().gitSetupStatus)) {
+          await loadGitSetupStatus();
+          if (!isGitSetupReady(ui().gitSetupStatus)) {
+            ui().setSettingsTab("git");
+            ui().setShowStatusDebug(true);
+            ui().showToast("Set up Git before opening the review panel", "error");
+            return;
+          }
+        }
         const next = !ui().gitPanelOpen;
         ui().setGitPanelOpen(next);
         if (next && !ui().gitChanges) await loadGitChanges(false);
+      },
+      generateGitSetupKey: async () => {
+        ui().setGitSetupActionRunning(true);
+        ui().setGitSetupResult(null);
+        try {
+          const result = await api.gitSetupGenerateKey();
+          ui().setGitSetupResult(result);
+          if (result.status) ui().setGitSetupStatus(result.status);
+          if (!result.ok) throw new Error(gitSetupResultMessage(result, "SSH key generation failed"));
+          ui().showToast("Git SSH key ready", "success");
+        } finally {
+          ui().setGitSetupActionRunning(false);
+        }
+      },
+      saveGitSetupRemote: async (remoteUrl: string) => {
+        const value = remoteUrl.trim();
+        if (!value) {
+          ui().showToast("Remote URL is required", "error");
+          return;
+        }
+        ui().setGitSetupActionRunning(true);
+        ui().setGitSetupResult(null);
+        try {
+          const result = await api.gitSetupSetRemote(value);
+          ui().setGitSetupResult(result);
+          if (result.status) ui().setGitSetupStatus(result.status);
+          if (!result.ok) throw new Error(gitSetupResultMessage(result, "Remote setup failed"));
+          ui().showToast("Git remote linked", "success");
+          await loadGitCount();
+        } finally {
+          ui().setGitSetupActionRunning(false);
+        }
+      },
+      pullGitSetupRemote: async () => {
+        ui().setGitSetupActionRunning(true);
+        ui().setGitSetupResult(null);
+        try {
+          const result = await api.gitSetupPull();
+          ui().setGitSetupResult(result);
+          if (result.status) ui().setGitSetupStatus(result.status);
+          if (!result.ok) throw new Error(gitSetupResultMessage(result, "Git pull failed"));
+          ui().showToast("Git pull completed", "success");
+          await loadGitCount();
+        } finally {
+          ui().setGitSetupActionRunning(false);
+        }
       },
       showMoreGitFiles: () => ui().showMoreGitFiles(),
       toggleGitFileDiff: async (path: string, oldPath = "") => {

@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { defaultGitSelection, gitFileKey, toggleGitSelection } from "../features/git/gitUtils";
 import { defaultHaCodexSettings } from "../features/settings/runtimeSettingsUtils";
-import type { BridgeLog, CodexAccountStatus, CodexDeviceLoginStatus, GitChanges, GitFile, HaCodexSettings } from "../types/ha";
+import type { BridgeLog, CodexAccountStatus, CodexDeviceLoginStatus, GitChanges, GitFile, GitSetupResult, GitSetupStatus, HaCodexSettings } from "../types/ha";
 import type { GitSelection } from "../features/git/gitUtils";
 import type { DebugTab, SettingsTab, Toast } from "../types/ui";
 
@@ -22,6 +22,10 @@ interface UiStore {
   settingsSaving: boolean;
   settingsTab: SettingsTab;
   gitPanelOpen: boolean;
+  gitSetupStatus: GitSetupStatus | null;
+  gitSetupLoading: boolean;
+  gitSetupActionRunning: boolean;
+  gitSetupResult: GitSetupResult | null;
   gitChanges: GitChanges | null;
   gitChangedCount: number;
   gitLoading: boolean;
@@ -56,6 +60,10 @@ interface UiStore {
   setSettingsSaving: (saving: boolean) => void;
   setSettingsTab: (tab: SettingsTab) => void;
   setGitPanelOpen: (open: boolean) => void;
+  setGitSetupStatus: (status: GitSetupStatus | null) => void;
+  setGitSetupLoading: (loading: boolean) => void;
+  setGitSetupActionRunning: (running: boolean) => void;
+  setGitSetupResult: (result: GitSetupResult | null) => void;
   setGitChanges: (changes: GitChanges | null) => void;
   setGitChangedCount: (count: number) => void;
   setGitLoading: (loading: boolean) => void;
@@ -92,6 +100,10 @@ export const useUiStore = create<UiStore>((set, get) => ({
   settingsSaving: false,
   settingsTab: "run",
   gitPanelOpen: false,
+  gitSetupStatus: null,
+  gitSetupLoading: false,
+  gitSetupActionRunning: false,
+  gitSetupResult: null,
   gitChanges: null,
   gitChangedCount: 0,
   gitLoading: false,
@@ -126,6 +138,10 @@ export const useUiStore = create<UiStore>((set, get) => ({
   setSettingsSaving: (settingsSaving) => set({ settingsSaving }),
   setSettingsTab: (settingsTab) => set({ settingsTab }),
   setGitPanelOpen: (gitPanelOpen) => set({ gitPanelOpen }),
+  setGitSetupStatus: (gitSetupStatus) => set({ gitSetupStatus }),
+  setGitSetupLoading: (gitSetupLoading) => set({ gitSetupLoading }),
+  setGitSetupActionRunning: (gitSetupActionRunning) => set({ gitSetupActionRunning }),
+  setGitSetupResult: (gitSetupResult) => set({ gitSetupResult }),
   setGitChanges: (gitChanges) => set({ gitChanges, gitSelection: defaultGitSelection(gitChanges?.files || []), gitVisibleLimit: get().gitPageSize }),
   setGitChangedCount: (gitChangedCount) => set({ gitChangedCount }),
   setGitLoading: (gitLoading) => set({ gitLoading }),

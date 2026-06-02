@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import difflib
+import shlex
 import subprocess
 from pathlib import Path
 from typing import Any
 
+_GIT_SETUP_KEY_NAME = "ha_codex_ed25519"
 _GIT_VISIBLE_PREFIXES = ("",)
 _GIT_VISIBLE_PATHSPECS = [":(top)"]
 _GIT_IGNORED_PARTS = (
@@ -56,6 +58,309 @@ _GIT_IGNORED_NAMES = {
 
 class GitOperationsMixin:
     """Mixin methods extracted from CodexManager."""
+
+    async def async_git_setup_status(self) -> dict[str, Any]:
+        """Return Git setup state for the workspace."""
+        private_key = self._git_setup_private_key_path()
+        public_key = private_key.with_suffix(f"{private_key.suffix}.pub")
+        public_key_text = self._read_git_public_key(public_key)
+        git_version = await self._run_command(["git", "--version"], cwd=None, timeout=10)
+        repository = False
+        branch = ""
+        remote_url = ""
+        upstream = ""
+        work_tree = ""
+        repo_error = ""
+
+        if git_version["ok"] and self._git_repository_marker_exists():
+            repo_result = await self._run_command(
+                self._git_command(["rev-parse", "--is-inside-work-tree"]),
+                cwd=None,
+                timeout=10,
+            )
+            repository = repo_result["ok"] and repo_result["stdout"].strip().lower() == "true"
+            repo_error = repo_result["stderr"].strip()
+            if repository:
+                work_tree_result = await self._run_command(
+                    self._git_command(["rev-parse", "--show-toplevel"]),
+                    cwd=None,
+                    timeout=10,
+                )
+                if work_tree_result["ok"]:
+                    work_tree = work_tree_result["stdout"].strip()
+                branch_result = await self._run_command(
+                    self._git_command(["branch", "--show-current"]),
+                    cwd=None,
+                    timeout=10,
+                )
+                if branch_result["ok"]:
+                    branch = branch_result["stdout"].strip()
+                remote_result = await self._run_command(
+                    self._git_command(["remote", "get-url", "origin"]),
+                    cwd=None,
+                    timeout=10,
+                )
+                if remote_result["ok"]:
+                    remote_url = remote_result["stdout"].strip()
+                upstream_result = await self._run_command(
+                    self._git_command(
+                        ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"]
+                    ),
+                    cwd=None,
+                    timeout=10,
+                )
+                if upstream_result["ok"]:
+                    upstream = upstream_result["stdout"].strip()
+        elif git_version["ok"]:
+            repo_error = "No Git repository is initialized under the Home Assistant config path."
+
+        remote_configured = bool(remote_url)
+        remote_uses_ssh = self._git_remote_uses_ssh(remote_url)
+        ssh_key_exists = private_key.is_file()
+        missing: list[str] = []
+        if not git_version["ok"]:
+            missing.append("git command")
+        if not repository:
+            missing.append("git repository")
+        if repository and not branch:
+            missing.append("current branch")
+        if not remote_configured:
+            missing.append("origin remote")
+        if remote_uses_ssh and not ssh_key_exists:
+            missing.append("SSH key")
+        setup_complete = (
+            git_version["ok"]
+            and repository
+            and bool(branch)
+            and remote_configured
+            and (not remote_uses_ssh or ssh_key_exists)
+        )
+        return {
+            "ok": True,
+            "git_available": git_version["ok"],
+            "git_version": git_version["stdout"].strip() if git_version["ok"] else "",
+            "repository": repository,
+            "repo_error": repo_error,
+            "work_tree": work_tree,
+            "branch": branch,
+            "upstream": upstream,
+            "remote_configured": remote_configured,
+            "remote_url": remote_url,
+            "remote_uses_ssh": remote_uses_ssh,
+            "ssh_key_exists": ssh_key_exists,
+            "ssh_key_path": str(private_key),
+            "ssh_public_key_path": str(public_key),
+            "public_key": public_key_text,
+            "setup_complete": setup_complete,
+            "missing": missing,
+        }
+
+    async def async_git_setup_generate_key(self) -> dict[str, Any]:
+        """Generate an SSH key pair for Git operations if one does not exist."""
+        private_key = self._git_setup_private_key_path()
+        public_key = private_key.with_suffix(f"{private_key.suffix}.pub")
+        if private_key.exists() and public_key.exists():
+            return {
+                "ok": True,
+                "step": "exists",
+                "public_key": self._read_git_public_key(public_key),
+                "status": await self.async_git_setup_status(),
+            }
+
+        def prepare_directory() -> dict[str, Any]:
+            try:
+                private_key.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+                private_key.parent.chmod(0o700)
+            except OSError as err:
+                return {"ok": False, "returncode": None, "stdout": "", "stderr": str(err)}
+            return {"ok": True, "returncode": 0, "stdout": "", "stderr": ""}
+
+        prepared = await self.hass.async_add_executor_job(prepare_directory)
+        if not prepared["ok"]:
+            return {"ok": False, "step": "prepare", "results": [prepared]}
+
+        keygen = await self._run_command(
+            [
+                "ssh-keygen",
+                "-t",
+                "ed25519",
+                "-C",
+                "ha-codex@home-assistant",
+                "-N",
+                "",
+                "-f",
+                str(private_key),
+            ],
+            cwd=None,
+            timeout=30,
+        )
+
+        def secure_key_files() -> None:
+            if private_key.exists():
+                private_key.chmod(0o600)
+            if public_key.exists():
+                public_key.chmod(0o644)
+
+        await self.hass.async_add_executor_job(secure_key_files)
+        return {
+            "ok": keygen["ok"],
+            "step": "generate_key",
+            "results": [prepared, keygen],
+            "public_key": self._read_git_public_key(public_key),
+            "status": await self.async_git_setup_status(),
+        }
+
+    async def async_git_setup_set_remote(self, remote_url: str) -> dict[str, Any]:
+        """Initialize Git if needed and set the origin remote URL."""
+        safe_remote = self._safe_git_remote_url(remote_url)
+        status = await self.async_git_setup_status()
+        results: list[dict[str, Any]] = []
+
+        if not status["git_available"]:
+            return {
+                "ok": False,
+                "step": "git",
+                "stderr": "git command is not available.",
+                "status": status,
+            }
+
+        if not status["repository"]:
+            init_result = await self._run_command(
+                [
+                    "git",
+                    "-C",
+                    str(Path(self.hass.config.path())),
+                    "init",
+                    "-b",
+                    "main",
+                ],
+                cwd=None,
+                timeout=60,
+            )
+            if not init_result["ok"]:
+                init_result = await self._run_command(
+                    ["git", "-C", str(Path(self.hass.config.path())), "init"],
+                    cwd=None,
+                    timeout=60,
+                )
+            results.append(init_result)
+            if not init_result["ok"]:
+                return {
+                    "ok": False,
+                    "step": "init",
+                    "results": results,
+                    "status": await self.async_git_setup_status(),
+                }
+
+        remote_status = await self._run_command(
+            self._git_command(["remote", "get-url", "origin"]),
+            cwd=None,
+            timeout=10,
+        )
+        remote_command = (
+            ["remote", "set-url", "origin", safe_remote]
+            if remote_status["ok"]
+            else ["remote", "add", "origin", safe_remote]
+        )
+        remote_result = await self._run_command(
+            self._git_command(remote_command),
+            cwd=None,
+            timeout=30,
+        )
+        results.append(remote_result)
+        if remote_result["ok"]:
+            results.extend(await self._git_setup_default_identity())
+        return {
+            "ok": remote_result["ok"],
+            "step": "remote",
+            "results": results,
+            "status": await self.async_git_setup_status(),
+        }
+
+    async def async_git_setup_pull(self) -> dict[str, Any]:
+        """Fetch and fast-forward the current branch from origin."""
+        status = await self.async_git_setup_status()
+        if not status["repository"] or not status["remote_configured"]:
+            return {
+                "ok": False,
+                "step": "setup",
+                "stderr": "Git repository and origin remote are required before pulling.",
+                "status": status,
+            }
+        if status["remote_uses_ssh"] and not status["ssh_key_exists"]:
+            return {
+                "ok": False,
+                "step": "ssh_key",
+                "stderr": "Generate an SSH key before pulling from an SSH remote.",
+                "status": status,
+            }
+
+        results: list[dict[str, Any]] = []
+        fetch_result = await self._run_command(
+            self._git_command(["fetch", "origin", "--prune"]),
+            cwd=None,
+            timeout=240,
+        )
+        results.append(fetch_result)
+        if not fetch_result["ok"]:
+            return {
+                "ok": False,
+                "step": "fetch",
+                "results": results,
+                "status": await self.async_git_setup_status(),
+            }
+
+        branch = status["branch"] or await self._git_remote_default_branch()
+        if not branch:
+            return {
+                "ok": False,
+                "step": "branch",
+                "stderr": "Could not determine a branch to pull.",
+                "results": results,
+                "status": await self.async_git_setup_status(),
+            }
+
+        head_result = await self._run_command(
+            self._git_command(["rev-parse", "--verify", "HEAD"]),
+            cwd=None,
+            timeout=10,
+        )
+        if not head_result["ok"]:
+            remote_branch = await self._git_remote_default_branch() or branch
+            checkout_result = await self._run_command(
+                self._git_command(["checkout", "-B", remote_branch, f"origin/{remote_branch}"]),
+                cwd=None,
+                timeout=120,
+            )
+            results.append(checkout_result)
+            if checkout_result["ok"]:
+                upstream_result = await self._run_command(
+                    self._git_command(
+                        ["branch", "--set-upstream-to", f"origin/{remote_branch}", remote_branch]
+                    ),
+                    cwd=None,
+                    timeout=30,
+                )
+                results.append(upstream_result)
+            return {
+                "ok": checkout_result["ok"],
+                "step": "checkout",
+                "results": results,
+                "status": await self.async_git_setup_status(),
+            }
+
+        pull_result = await self._run_command(
+            self._git_command(["pull", "--ff-only", "origin", branch]),
+            cwd=None,
+            timeout=240,
+        )
+        results.append(pull_result)
+        return {
+            "ok": pull_result["ok"],
+            "step": "pull",
+            "results": results,
+            "status": await self.async_git_setup_status(),
+        }
 
     async def async_git_status(self) -> dict[str, Any]:
         """Return git status for the workspace."""
@@ -693,8 +998,121 @@ class GitOperationsMixin:
             return "modified"
         return compact.lower() or "changed"
 
+    async def _git_setup_default_identity(self) -> list[dict[str, Any]]:
+        """Set a local default commit identity when the repo does not have one."""
+        results: list[dict[str, Any]] = []
+        name = await self._run_command(
+            self._git_command(["config", "--get", "user.name"]),
+            cwd=None,
+            timeout=10,
+        )
+        if not name["ok"] or not name["stdout"].strip():
+            results.append(
+                await self._run_command(
+                    self._git_command(["config", "user.name", "HA Codex"]),
+                    cwd=None,
+                    timeout=10,
+                )
+            )
+        email = await self._run_command(
+            self._git_command(["config", "--get", "user.email"]),
+            cwd=None,
+            timeout=10,
+        )
+        if not email["ok"] or not email["stdout"].strip():
+            results.append(
+                await self._run_command(
+                    self._git_command(["config", "user.email", "ha-codex@home-assistant.local"]),
+                    cwd=None,
+                    timeout=10,
+                )
+            )
+        return results
+
+    async def _git_remote_default_branch(self) -> str:
+        """Return the best origin branch for first pull checkout."""
+        symbolic = await self._run_command(
+            self._git_command(["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"]),
+            cwd=None,
+            timeout=10,
+        )
+        if symbolic["ok"] and symbolic["stdout"].strip().startswith("origin/"):
+            return symbolic["stdout"].strip().removeprefix("origin/")
+        for branch in ("main", "master"):
+            exists = await self._run_command(
+                self._git_command(["rev-parse", "--verify", f"origin/{branch}"]),
+                cwd=None,
+                timeout=10,
+            )
+            if exists["ok"]:
+                return branch
+        branches = await self._run_command(
+            self._git_command(["branch", "-r", "--format=%(refname:short)"]),
+            cwd=None,
+            timeout=10,
+        )
+        if branches["ok"]:
+            for line in branches["stdout"].splitlines():
+                branch = line.strip()
+                if branch.startswith("origin/") and branch != "origin/HEAD":
+                    return branch.removeprefix("origin/")
+        return ""
+
+    def _git_setup_private_key_path(self) -> Path:
+        return Path(self.hass.config.path(".ssh", _GIT_SETUP_KEY_NAME))
+
+    def _git_repository_marker_exists(self) -> bool:
+        config_path = Path(self.hass.config.path())
+        workspace_path = Path(self.workspace_path)
+        return (
+            (config_path / ".git").exists()
+            or (config_path / ".git-real").is_dir()
+            or (workspace_path / ".git-real").is_dir()
+        )
+
+    def _read_git_public_key(self, public_key: Path) -> str:
+        try:
+            return public_key.read_text(encoding="utf-8").strip()
+        except OSError:
+            return ""
+
+    def _git_remote_uses_ssh(self, remote_url: str) -> bool:
+        value = remote_url.strip().lower()
+        if not value:
+            return False
+        return value.startswith("ssh://") or (
+            "@" in value and ":" in value and not value.startswith(("http://", "https://"))
+        )
+
+    def _safe_git_remote_url(self, remote_url: str) -> str:
+        value = str(remote_url or "").strip()
+        if not value or "\0" in value or "\n" in value or "\r" in value or value.startswith("-"):
+            raise ValueError("Git remote URL is invalid")
+        return value
+
+    def _git_ssh_command(self) -> str | None:
+        private_key = self._git_setup_private_key_path()
+        if not private_key.is_file():
+            return None
+        known_hosts = private_key.parent / "known_hosts"
+        return " ".join(
+            [
+                "ssh",
+                "-i",
+                shlex.quote(str(private_key)),
+                "-o",
+                "IdentitiesOnly=yes",
+                "-o",
+                "StrictHostKeyChecking=accept-new",
+                "-o",
+                f"UserKnownHostsFile={shlex.quote(str(known_hosts))}",
+            ]
+        )
+
     def _git_command(self, args: list[str]) -> list[str]:
         """Build a git command that works with the HA root backup work tree."""
+        ssh_command = self._git_ssh_command()
+        ssh_args = ["-c", f"core.sshCommand={ssh_command}"] if ssh_command else []
         config_path = Path(self.hass.config.path())
         config_git_dir = config_path / ".git-real"
         if config_git_dir.is_dir():
@@ -702,6 +1120,7 @@ class GitOperationsMixin:
                 "git",
                 f"--git-dir={config_git_dir}",
                 f"--work-tree={self._git_work_tree(config_git_dir, config_path)}",
+                *ssh_args,
                 *args,
             ]
 
@@ -712,10 +1131,11 @@ class GitOperationsMixin:
                 "git",
                 f"--git-dir={workspace_git_dir}",
                 f"--work-tree={self._git_work_tree(workspace_git_dir, workspace_path)}",
+                *ssh_args,
                 *args,
             ]
 
-        return ["git", "-C", str(config_path), *args]
+        return ["git", "-C", str(config_path), *ssh_args, *args]
 
     def _git_work_tree_from_command(self) -> str:
         """Return the effective git work tree used by _git_command."""

@@ -47,6 +47,10 @@ def async_register_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, websocket_sessions_delete)
     websocket_api.async_register_command(hass, websocket_sessions_archive)
     websocket_api.async_register_command(hass, websocket_approvals_respond)
+    websocket_api.async_register_command(hass, websocket_git_setup_status)
+    websocket_api.async_register_command(hass, websocket_git_setup_generate_key)
+    websocket_api.async_register_command(hass, websocket_git_setup_set_remote)
+    websocket_api.async_register_command(hass, websocket_git_setup_pull)
     websocket_api.async_register_command(hass, websocket_git_status)
     websocket_api.async_register_command(hass, websocket_git_diff)
     websocket_api.async_register_command(hass, websocket_git_changes)
@@ -667,6 +671,63 @@ async def websocket_git_status(
 ) -> None:
     """Return git status."""
     connection.send_result(msg["id"], await _manager(hass).async_git_status())
+
+
+@websocket_api.websocket_command({"type": "ha_codex/git/setup/status"})
+@websocket_api.require_admin
+@websocket_api.async_response
+async def websocket_git_setup_status(
+    hass: HomeAssistant,
+    connection: ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Return Git setup status."""
+    connection.send_result(msg["id"], await _manager(hass).async_git_setup_status())
+
+
+@websocket_api.websocket_command({"type": "ha_codex/git/setup/generate_key"})
+@websocket_api.require_admin
+@websocket_api.async_response
+async def websocket_git_setup_generate_key(
+    hass: HomeAssistant,
+    connection: ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Generate a Git SSH key."""
+    connection.send_result(msg["id"], await _manager(hass).async_git_setup_generate_key())
+
+
+@websocket_api.websocket_command(
+    {
+        "type": "ha_codex/git/setup/set_remote",
+        vol.Required("remote_url"): str,
+    }
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+async def websocket_git_setup_set_remote(
+    hass: HomeAssistant,
+    connection: ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Set Git origin remote."""
+    try:
+        result = await _manager(hass).async_git_setup_set_remote(msg["remote_url"])
+    except ValueError as err:
+        _raise_value_error(err)
+    connection.send_result(msg["id"], result)
+
+
+@websocket_api.websocket_command({"type": "ha_codex/git/setup/pull"})
+@websocket_api.require_admin
+@websocket_api.async_response
+async def websocket_git_setup_pull(
+    hass: HomeAssistant,
+    connection: ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Pull Git origin."""
+    connection.send_result(msg["id"], await _manager(hass).async_git_setup_pull())
 
 
 @websocket_api.websocket_command({"type": "ha_codex/git/diff"})

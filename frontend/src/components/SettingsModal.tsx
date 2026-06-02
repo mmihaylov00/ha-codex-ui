@@ -1,8 +1,9 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import { Icon } from "./Icon";
 import { useUiStore } from "../stores/uiStore";
-import type { HaCodexSettings, ModelPreset, RunSettings } from "../types/ha";
+import type { GitSetupResult, HaCodexSettings, ModelPreset, RunSettings } from "../types/ha";
 import type { SettingsTab } from "../types/ui";
+import { gitSetupMissingItems, isGitSetupReady } from "../features/git/gitUtils";
 import { BUILT_IN_MODEL_PRESET_IDS, deleteModelPreset, presetIdFromLabel, upsertModelPreset } from "../features/settings/runtimeSettingsUtils";
 import { copyText, formatDuration, formatRunTime, stripAnsi } from "../utils/format";
 
@@ -17,17 +18,22 @@ interface SettingsModalProps {
   onDeviceLogin: () => void;
   onDeviceLoginCancel: () => void;
   onAccountLogout: () => void;
+  onGitSetupRefresh: () => void;
+  onGitSetupGenerateKey: () => void;
+  onGitSetupRemoteSave: (remoteUrl: string) => void;
+  onGitSetupPull: () => void;
 }
 
 const TABS: Array<{ id: SettingsTab; label: string }> = [
   { id: "account", label: "Account" },
+  { id: "git", label: "Git" },
   { id: "run", label: "Run" },
   { id: "models", label: "Models" },
   { id: "debug", label: "Debug" },
   { id: "bridge-log", label: "Bridge Log" },
 ];
 
-export function SettingsModal({ onClose, onTab, onSettingsSave, onBridgeRestart, onCoreRestart, onBridgeLogRefresh, onBridgeLogClear, onDeviceLogin, onDeviceLoginCancel, onAccountLogout }: SettingsModalProps) {
+export function SettingsModal({ onClose, onTab, onSettingsSave, onBridgeRestart, onCoreRestart, onBridgeLogRefresh, onBridgeLogClear, onDeviceLogin, onDeviceLoginCancel, onAccountLogout, onGitSetupRefresh, onGitSetupGenerateKey, onGitSetupRemoteSave, onGitSetupPull }: SettingsModalProps) {
   const tab = useUiStore((state) => state.settingsTab);
   const settings = useUiStore((state) => state.settings);
   const saving = useUiStore((state) => state.settingsSaving);
@@ -63,6 +69,7 @@ export function SettingsModal({ onClose, onTab, onSettingsSave, onBridgeRestart,
         </div>
         <div className="modal-body">
           {tab === "account" ? <AccountTab onDeviceLogin={onDeviceLogin} onDeviceLoginCancel={onDeviceLoginCancel} onAccountLogout={onAccountLogout} /> : null}
+          {tab === "git" ? <GitSetupTab onRefresh={onGitSetupRefresh} onGenerateKey={onGitSetupGenerateKey} onRemoteSave={onGitSetupRemoteSave} onPull={onGitSetupPull} /> : null}
           {tab === "run" ? <RunSettingsTab settings={settings} onSave={onSettingsSave} /> : null}
           {tab === "models" ? <ModelsTab settings={settings} onSave={onSettingsSave} /> : null}
           {tab === "debug" ? <DebugTabView /> : null}
@@ -191,6 +198,134 @@ function extractDeviceLoginCode(output: string): string {
 
 function AccountDetail({ label, value }: { label: string; value: string }) {
   return <div className="account-detail"><span>{label}</span><strong>{value}</strong></div>;
+}
+
+function GitSetupTab({
+  onRefresh,
+  onGenerateKey,
+  onRemoteSave,
+  onPull,
+}: {
+  onRefresh: () => void;
+  onGenerateKey: () => void;
+  onRemoteSave: (remoteUrl: string) => void;
+  onPull: () => void;
+}) {
+  const status = useUiStore((state) => state.gitSetupStatus);
+  const loading = useUiStore((state) => state.gitSetupLoading);
+  const running = useUiStore((state) => state.gitSetupActionRunning);
+  const result = useUiStore((state) => state.gitSetupResult);
+  const showToast = useUiStore((state) => state.showToast);
+  const ready = isGitSetupReady(status);
+  const missing = gitSetupMissingItems(status);
+  const publicKey = status?.public_key || result?.public_key || "";
+  const [remoteDraft, setRemoteDraft] = useState(status?.remote_url || "");
+  const [keyCopied, setKeyCopied] = useState(false);
+
+  useLayoutEffect(() => {
+    setRemoteDraft(status?.remote_url || "");
+  }, [status?.remote_url]);
+
+  const copyPublicKey = async () => {
+    if (!publicKey) return;
+    await copyText(publicKey);
+    setKeyCopied(true);
+    window.setTimeout(() => setKeyCopied(false), 1600);
+    showToast("Git public key copied", "success");
+  };
+
+  return (
+    <div className="settings-git">
+      <section className={`git-setup-summary ${ready ? "success" : "warning"}`}>
+        <div className="account-status-main">
+          <Icon icon={ready ? "mdi:source-branch-check" : "mdi:source-branch-sync"} />
+          <div>
+            <strong>{loading ? "Checking Git setup..." : ready ? "Git integration ready" : "Git setup incomplete"}</strong>
+            <span>{ready ? "Review, commit, and push controls are enabled." : `Missing: ${missing.join(", ") || "setup status"}`}</span>
+          </div>
+        </div>
+        <button className="ghost" onClick={onRefresh} disabled={loading || running}>
+          <Icon icon={loading ? "mdi:progress-clock" : "mdi:refresh"} />
+          <span>{loading ? "Checking..." : "Refresh"}</span>
+        </button>
+      </section>
+
+      <div className="git-setup-cards">
+        <GitSetupCard label="Git" value={status?.git_available ? "Available" : "Missing"} detail={status?.git_version || "git command"} ok={status?.git_available === true} />
+        <GitSetupCard label="Repository" value={status?.repository ? "Initialized" : "Not initialized"} detail={status?.work_tree || status?.repo_error || "Home Assistant config"} ok={status?.repository === true} />
+        <GitSetupCard label="SSH key" value={status?.ssh_key_exists ? "Created" : "Missing"} detail={status?.ssh_key_path || "/config/.ssh"} ok={status?.ssh_key_exists === true || status?.remote_uses_ssh === false} />
+        <GitSetupCard label="Origin" value={status?.remote_configured ? "Linked" : "Missing"} detail={status?.remote_url || "No origin remote"} ok={status?.remote_configured === true} />
+        <GitSetupCard label="Branch" value={status?.branch || "Missing"} detail={status?.upstream || "No upstream reported"} ok={Boolean(status?.branch)} />
+      </div>
+
+      <section className="settings-section git-setup-section">
+        <h3>SSH key</h3>
+        <div className="git-setup-row">
+          <button onClick={onGenerateKey} disabled={running || status?.ssh_key_exists === true}>
+            <Icon icon={running ? "mdi:progress-clock" : "mdi:key-plus"} />
+            <span>{status?.ssh_key_exists ? "Key ready" : "Generate key"}</span>
+          </button>
+          <a href="https://docs.github.com/en/authentication/connecting-to-github-with-ssh/adding-a-new-ssh-key-to-your-github-account" target="_blank" rel="noreferrer">GitHub SSH keys</a>
+        </div>
+        {publicKey ? (
+          <div className={`git-public-key ${keyCopied ? "copied" : ""}`}>
+            <pre>{publicKey}</pre>
+            <button className="icon-button" onClick={copyPublicKey} title={keyCopied ? "Copied" : "Copy public key"} aria-label={keyCopied ? "Copied" : "Copy public key"}>
+              <Icon icon={keyCopied ? "mdi:check" : "mdi:content-copy"} />
+            </button>
+          </div>
+        ) : null}
+      </section>
+
+      <section className="settings-section git-setup-section">
+        <h3>Remote repository</h3>
+        <div className="git-remote-form">
+          <input value={remoteDraft} onChange={(event) => setRemoteDraft(event.currentTarget.value)} placeholder="git@github.com:owner/repository.git" aria-label="Git origin remote URL" />
+          <button onClick={() => onRemoteSave(remoteDraft)} disabled={running || !remoteDraft.trim()}>
+            <Icon icon={running ? "mdi:progress-clock" : "mdi:link-variant-plus"} />
+            <span>Save remote</span>
+          </button>
+        </div>
+      </section>
+
+      <section className="settings-section git-setup-section">
+        <h3>Pull</h3>
+        <div className="git-setup-row">
+          <button onClick={onPull} disabled={running || !status?.remote_configured}>
+            <Icon icon={running ? "mdi:progress-clock" : "mdi:source-pull"} />
+            <span>Pull from origin</span>
+          </button>
+          <span className="muted">{status?.branch ? `Current branch: ${status.branch}` : "Initialize and link a remote first."}</span>
+        </div>
+      </section>
+
+      <GitSetupResultView result={result} />
+    </div>
+  );
+}
+
+function GitSetupCard({ label, value, detail, ok }: { label: string; value: string; detail: string; ok: boolean }) {
+  return <div className={`runtime-card ${ok ? "success" : "warning"}`}><span>{label}</span><strong>{value}</strong><small title={detail}>{detail}</small></div>;
+}
+
+function GitSetupResultView({ result }: { result: GitSetupResult | null }) {
+  if (!result) return null;
+  const output = gitSetupResultOutput(result);
+  return (
+    <section className={`git-setup-result ${result.ok ? "success" : "error"}`}>
+      <strong>{result.ok ? "Last Git setup action completed" : "Last Git setup action failed"}</strong>
+      {result.step ? <span>{result.step}</span> : null}
+      {output ? <pre>{output}</pre> : null}
+    </section>
+  );
+}
+
+function gitSetupResultOutput(result: GitSetupResult): string {
+  return stripAnsi([
+    result.stdout,
+    result.stderr,
+    ...(result.results || []).flatMap((item) => [item.stdout, item.stderr]),
+  ].filter(Boolean).join("\n")).trim();
 }
 
 function RunSettingsTab({ settings, onSave }: { settings: HaCodexSettings; onSave: (settings: Partial<HaCodexSettings>) => void }) {

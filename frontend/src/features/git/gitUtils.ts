@@ -1,4 +1,4 @@
-import type { GitFile } from "../../types/ha";
+import type { GitFile, GitSetupStatus } from "../../types/ha";
 
 export type GitSelection = Record<string, true>;
 
@@ -70,6 +70,15 @@ export function toggleGitSelection(file: GitFile, selection: GitSelection = {}):
 
 export function gitReviewActionDisabled(files: GitFile[] = [], selection: GitSelection = {}, running = false): boolean {
   return running || selectedGitFileCount(files, selection) === 0;
+}
+
+export function isGitSetupReady(status: GitSetupStatus | null | undefined): boolean {
+  return status?.setup_complete === true;
+}
+
+export function gitSetupMissingItems(status: GitSetupStatus | null | undefined): string[] {
+  if (!status) return ["setup status"];
+  return status.missing?.length ? status.missing : [];
 }
 
 export function parsePatchLines(patch: string) {

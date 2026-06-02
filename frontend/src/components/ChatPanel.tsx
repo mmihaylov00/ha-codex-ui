@@ -10,7 +10,7 @@ import type { CodexSession, HaCodexSettings, HomeAssistant, RunSettings } from "
 import type { HaCodexApi } from "../services/api";
 import type { ContextSendPayload, HaContextItem } from "../features/context/contextUtils";
 import { currentQuestionFromMessages, isSessionBusy, messageKey, pendingApprovals, visibleMessages } from "../features/chat/chatUtils";
-import { reviewableGitFileCount } from "../features/git/gitUtils";
+import { isGitSetupReady, reviewableGitFileCount } from "../features/git/gitUtils";
 import { isRunPlanGenerating, pendingRunPlan } from "../features/runPlan/runPlanUtils";
 import { contextBudgetState, runSettingsForSession } from "../features/settings/runtimeSettingsUtils";
 
@@ -344,8 +344,9 @@ function ActiveChat({ activeId, ...props }: ChatPanelProps & { activeId: string 
 
 function GitToggleButton({ onClick }: { onClick: () => void }) {
   const gitOpen = useUiStore((state) => state.gitPanelOpen);
+  const gitReady = useUiStore((state) => isGitSetupReady(state.gitSetupStatus));
   const count = useUiStore((state) => state.gitChanges?.files ? reviewableGitFileCount(state.gitChanges.files) : state.gitChangedCount);
-  if (gitOpen) return null;
+  if (gitOpen || !gitReady) return null;
   return <button className="git-toggle" onClick={onClick} title="Open Git panel" aria-label="Open Git panel"><Icon icon="mdi:source-branch" /><span>Git</span>{count ? <b>{count}</b> : null}</button>;
 }
 

@@ -32,4 +32,4 @@ export interface CodexQuestion {
 }
 
 export type DebugTab = "status" | "bridge-log" | "validation";
-export type SettingsTab = "account" | "run" | "models" | "debug" | "bridge-log";
+export type SettingsTab = "account" | "git" | "run" | "models" | "debug" | "bridge-log";

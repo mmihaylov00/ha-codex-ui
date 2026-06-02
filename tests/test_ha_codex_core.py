@@ -1714,6 +1714,74 @@ class GitCommandTests(unittest.TestCase):
 
 
 class GitReviewOperationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_git_setup_status_requires_origin_remote(self):
+        with TemporaryDirectory(dir=CONFIG_TEMP_DIR) as tmp:
+            root = Path(tmp) / "repo"
+            root.mkdir()
+            subprocess.run(
+                ["git", "init", "-b", "main", str(root)],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            manager = _make_manager(root)
+
+            status = await manager.async_git_setup_status()
+
+        self.assertTrue(status["git_available"], status)
+        self.assertTrue(status["repository"], status)
+        self.assertFalse(status["remote_configured"], status)
+        self.assertFalse(status["setup_complete"], status)
+        self.assertIn("origin remote", status["missing"])
+
+    async def test_git_setup_set_remote_initializes_config_repo(self):
+        with TemporaryDirectory(dir=CONFIG_TEMP_DIR) as tmp:
+            root = Path(tmp) / "repo"
+            remote = Path(tmp) / "remote.git"
+            root.mkdir()
+            subprocess.run(
+                ["git", "init", "--bare", str(remote)],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            manager = _make_manager(root)
+
+            result = await manager.async_git_setup_set_remote(str(remote))
+
+            self.assertTrue(result["ok"], result)
+            self.assertTrue((root / ".git").is_dir())
+            self.assertEqual(_git(root, "remote", "get-url", "origin").stdout.strip(), str(remote))
+            self.assertTrue(result["status"]["setup_complete"], result)
+
+    async def test_git_setup_pull_fast_forwards_current_branch(self):
+        with TemporaryDirectory(dir=CONFIG_TEMP_DIR) as tmp:
+            root, remote = _create_git_repo(Path(tmp))
+            upstream = Path(tmp) / "upstream"
+            subprocess.run(
+                ["git", "clone", str(remote), str(upstream)],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+            _git(upstream, "config", "user.email", "ha-codex@example.test")
+            _git(upstream, "config", "user.name", "HA Codex")
+            (upstream / "configuration.yaml").write_text(
+                "homeassistant:\n  name: Pulled\n",
+                encoding="utf-8",
+            )
+            _git(upstream, "commit", "-am", "remote update")
+            _git(upstream, "push", "origin", "main")
+            manager = _make_manager(root)
+
+            result = await manager.async_git_setup_pull()
+
+            self.assertTrue(result["ok"], result)
+            self.assertEqual(
+                (root / "configuration.yaml").read_text(encoding="utf-8"),
+                "homeassistant:\n  name: Pulled\n",
+            )
+
     async def test_commit_push_only_selected_files(self):
         with TemporaryDirectory(dir=CONFIG_TEMP_DIR) as tmp:
             root, _remote = _create_git_repo(Path(tmp))

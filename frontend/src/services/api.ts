@@ -11,6 +11,8 @@ import type {
   EntityRegistryEntry,
   GitChanges,
   GitFile,
+  GitSetupResult,
+  GitSetupStatus,
   HaCodexSettings,
   HomeAssistant,
   RollbackResult,
@@ -205,6 +207,22 @@ export class HaCodexApi {
 
   gitStatus() {
     return this.callWS<GitChanges>({ type: "ha_codex/git/status" });
+  }
+
+  gitSetupStatus() {
+    return this.callWS<GitSetupStatus>({ type: "ha_codex/git/setup/status" });
+  }
+
+  gitSetupGenerateKey() {
+    return this.callWS<GitSetupResult>({ type: "ha_codex/git/setup/generate_key" });
+  }
+
+  gitSetupSetRemote(remoteUrl: string) {
+    return this.callWS<GitSetupResult>({ type: "ha_codex/git/setup/set_remote", remote_url: remoteUrl });
+  }
+
+  gitSetupPull() {
+    return this.callWS<GitSetupResult>({ type: "ha_codex/git/setup/pull" });
   }
 
   gitChanges() {

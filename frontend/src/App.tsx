@@ -13,6 +13,7 @@ import { SettingsModal } from "./components/SettingsModal";
 import { ToastStack } from "./components/ToastStack";
 import { copyText, errorSummary } from "./utils/format";
 import { useSidebarBadge } from "./hooks/useSidebarBadge";
+import { isGitSetupReady } from "./features/git/gitUtils";
 
 const queryClient = new QueryClient();
 const INITIAL_TRANSCRIPT_LIMIT = 200;
@@ -30,6 +31,7 @@ function CodexApp({ hass, panel }: { hass: HomeAssistant | null; panel: PanelInf
   const actions = useHaCodexActions(api);
   const actionsRef = useRef(actions);
   const gitOpen = useUiStore((state) => state.gitPanelOpen);
+  const gitReady = useUiStore((state) => isGitSetupReady(state.gitSetupStatus));
   const showDebug = useUiStore((state) => state.showStatusDebug);
   const setShowArchived = useChatStore((state) => state.setShowArchived);
   const showArchived = useChatStore((state) => state.showArchived);
@@ -100,7 +102,7 @@ function CodexApp({ hass, panel }: { hass: HomeAssistant | null; panel: PanelInf
   };
 
   return (
-    <main className={`shell ${gitOpen ? "git-open" : "git-closed"}`}>
+    <main className={`shell ${gitOpen && gitReady ? "git-open" : "git-closed"}`}>
       <Rail
         onNew={guarded(actions.createSession)}
         onSelect={setActiveId}
@@ -143,15 +145,17 @@ function CodexApp({ hass, panel }: { hass: HomeAssistant | null; panel: PanelInf
           onRunSettingsChange={guarded(actions.updateSessionRunSettings)}
         />
       </section>
-      <GitDrawer
-        open={gitOpen}
-        onClose={() => setGitPanelOpen(false)}
-        onRefresh={guarded(() => actions.loadGitChanges(true))}
-        onLoadMore={actions.showMoreGitFiles}
-        onToggleFile={guarded(actions.toggleGitFileDiff)}
-        onCommit={guarded(actions.commitAndPush)}
-        onDiscard={guarded(actions.discardSelectedGitFiles)}
-      />
+      {gitReady ? (
+        <GitDrawer
+          open={gitOpen}
+          onClose={() => setGitPanelOpen(false)}
+          onRefresh={guarded(() => actions.loadGitChanges(true))}
+          onLoadMore={actions.showMoreGitFiles}
+          onToggleFile={guarded(actions.toggleGitFileDiff)}
+          onCommit={guarded(actions.commitAndPush)}
+          onDiscard={guarded(actions.discardSelectedGitFiles)}
+        />
+      ) : null}
       {showDebug ? (
         <SettingsModal
           onClose={() => setShowStatusDebug(false)}
@@ -159,6 +163,7 @@ function CodexApp({ hass, panel }: { hass: HomeAssistant | null; panel: PanelInf
             setSettingsTab(tab);
             if (tab === "bridge-log" && !useUiStore.getState().bridgeLog) await actions.loadBridgeLog();
             if (tab === "account") await actions.loadAccountStatus();
+            if (tab === "git") await actions.loadGitSetupStatus();
           })}
           onSettingsSave={guarded(actions.updateSettings)}
           onBridgeRestart={guarded(actions.startOrRestartBridge)}
@@ -168,6 +173,10 @@ function CodexApp({ hass, panel }: { hass: HomeAssistant | null; panel: PanelInf
           onDeviceLogin={guarded(actions.startDeviceLogin)}
           onDeviceLoginCancel={guarded(actions.cancelDeviceLogin)}
           onAccountLogout={guarded(actions.logoutAccount)}
+          onGitSetupRefresh={guarded(async () => { await actions.loadGitSetupStatus(); })}
+          onGitSetupGenerateKey={guarded(actions.generateGitSetupKey)}
+          onGitSetupRemoteSave={guarded(actions.saveGitSetupRemote)}
+          onGitSetupPull={guarded(actions.pullGitSetupRemote)}
         />
       ) : null}
       <ToastStack />

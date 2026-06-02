@@ -164,6 +164,36 @@ export interface GitChanges {
   discarded_paths?: string[];
 }
 
+export interface GitSetupStatus {
+  ok?: boolean;
+  git_available?: boolean;
+  git_version?: string;
+  repository?: boolean;
+  repo_error?: string;
+  work_tree?: string;
+  branch?: string;
+  upstream?: string;
+  remote_configured?: boolean;
+  remote_url?: string;
+  remote_uses_ssh?: boolean;
+  ssh_key_exists?: boolean;
+  ssh_key_path?: string;
+  ssh_public_key_path?: string;
+  public_key?: string;
+  setup_complete?: boolean;
+  missing?: string[];
+}
+
+export interface GitSetupResult {
+  ok?: boolean;
+  step?: string;
+  stdout?: string;
+  stderr?: string;
+  public_key?: string;
+  status?: GitSetupStatus;
+  results?: Array<{ ok?: boolean; stdout?: string; stderr?: string; returncode?: number | null }>;
+}
+
 export interface RollbackSummary {
   checkpoint_id?: string;
   run_id?: string;
