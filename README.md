@@ -12,6 +12,9 @@ changes, handling approvals, and running Home Assistant validation. Use it for
 generating and iterating on (vibecoding) automations, dashboards, scripts,
 scenes, YAML, and other configurable parts of Home Assistant.
 
+After the initial version, HA Codex UI itself has been built directly inside
+Home Assistant using this workflow.
+
 This integration can execute commands and edit files in your Home Assistant
 configuration. Keep `require_admin: true`, review approval prompts carefully, and
 install it only on Home Assistant instances you control.
