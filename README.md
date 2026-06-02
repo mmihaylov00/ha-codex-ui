@@ -36,8 +36,8 @@ feature ideas are welcome.
   bridge status, view logs, and see Codex runtime diagnostics from the panel.
 - **Git-assisted change review**: set up a Git remote, review diffs, commit,
   push, or discard selected files when Git is configured.
-- **UI-based setup**: install with HACS, configure from **Settings > Devices &
-  services**, and edit options later from **Configure**.
+- **UI-based setup**: install the integration files manually, configure from
+  **Settings > Devices & services**, and edit options later from **Configure**.
 
 ## Prerequisites
 
@@ -45,11 +45,9 @@ Before installing HA Codex UI, make sure you have:
 
 - **Home Assistant access**: use a Home Assistant instance you control and sign
   in with an administrator account. Keep HA Codex UI admin-only.
-- **HACS**: install and configure
-  [HACS](https://www.hacs.xyz/docs/use/download/download/).
 - **Terminal access to Home Assistant**: the installation below uses a shell
   that can access `/config`.
-- **Download tools**: the recommended Codex CLI install uses `curl` and `sh` in
+- **Download tools**: the installation below uses `curl`, `sh`, and `unzip` in
   the Home Assistant terminal.
 - **Codex access**: use an OpenAI or ChatGPT account with Codex access enabled.
 - **Optional Git integration requirements**: to use the Git setup page, your
@@ -95,25 +93,28 @@ cd /config
 ### 2. Check terminal download tools
 
 The recommended Codex CLI install uses the standalone installer from OpenAI's
-Codex CLI docs. Check that `curl` is available:
+Codex CLI docs. The manual HA Codex UI install downloads and extracts the GitHub
+release package. Check that `curl` and `unzip` are available:
 
 ```sh
 curl --version
+unzip -v
 ```
 
-If `curl` is missing in Advanced SSH & Web Terminal, install it in that terminal
-app/add-on:
+If either command is missing in Advanced SSH & Web Terminal, install the missing
+package in that terminal app/add-on:
 
 1. Open the **Advanced SSH & Web Terminal** app/add-on page.
 2. Open **Configuration**.
-3. Add `curl` to the custom Alpine packages if your version exposes a package
-   list.
+3. Add `curl` and `unzip` to the custom Alpine packages if your version exposes
+   a package list.
 4. Save the configuration.
 5. Restart the app/add-on.
 6. Open the web terminal again and run:
 
 ```sh
 curl --version
+unzip -v
 ```
 
 ### 3. Install the Codex CLI at `/config/bin/codex`
@@ -153,19 +154,27 @@ git --version
 command -v ssh-keygen
 ```
 
-### 4. Install HA Codex UI with HACS
+### 4. Install HA Codex UI manually
 
-[![Open your Home Assistant instance and open a repository inside HACS.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=mmihaylov00&repository=ha-codex-ui&category=integration)
+Download the latest release package and extract it into Home Assistant's custom
+components directory. Run these commands from the Home Assistant terminal:
 
-Until the repository is included in the default HACS store, add it as a custom
-repository:
+```sh
+mkdir -p /config/custom_components/ha_codex
+curl -L -o /tmp/ha_codex.zip \
+  https://github.com/mmihaylov00/ha-codex-ui/releases/latest/download/ha_codex.zip
+rm -rf /config/custom_components/ha_codex
+mkdir -p /config/custom_components/ha_codex
+unzip -q /tmp/ha_codex.zip -d /config/custom_components/ha_codex
+test -f /config/custom_components/ha_codex/manifest.json
+test -f /config/custom_components/ha_codex/frontend/panel.js
+```
 
-1. Open HACS.
-2. Select **Custom repositories**.
-3. Add `https://github.com/mmihaylov00/ha-codex-ui`.
-4. Select category **Integration**.
-5. Download **HA Codex UI**.
-6. Restart Home Assistant Core.
+Restart Home Assistant Core after the files are copied:
+
+```sh
+ha core restart
+```
 
 ### 5. Add the Home Assistant integration
 
@@ -229,7 +238,7 @@ the important values are created or edited:
 
 | Value | Where to set it | Default or path |
 | --- | --- | --- |
-| HACS repository | **HACS > Custom repositories** | `https://github.com/mmihaylov00/ha-codex-ui`, category **Integration** |
+| Integration files | Home Assistant terminal, installation step 4 | `/config/custom_components/ha_codex` |
 | Codex CLI install path | Home Assistant terminal, installation step 3 | `/config/bin/codex` |
 | Integration options | **Settings > Devices & services > HA Codex UI > Configure** | See the table below |
 | Codex credentials | **Codex > Settings > Account** | `/config/codex_home` |
