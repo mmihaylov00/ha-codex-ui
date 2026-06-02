@@ -2,7 +2,6 @@ name: CI
 
 permissions:
   contents: read
-  id-token: write
 
 on:
   workflow_dispatch:
@@ -50,7 +49,7 @@ jobs:
           fail_ci_if_error: true
           files: coverage-python.xml
           flags: python
-          use_oidc: true
+          token: ${{ secrets.CODECOV_TOKEN }}
           verbose: true
 
   frontend:
@@ -91,7 +90,7 @@ jobs:
           fail_ci_if_error: true
           files: coverage-frontend.lcov
           flags: frontend
-          use_oidc: true
+          token: ${{ secrets.CODECOV_TOKEN }}
           verbose: true
 
       - name: Frontend build
