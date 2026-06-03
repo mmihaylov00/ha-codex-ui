@@ -47,6 +47,7 @@ from custom_components.ha_codex.runtime_settings import (
 )
 from custom_components.ha_codex.validation_lab import (
     build_validation_summary,
+    is_ha_relevant_change,
     reload_service_for_domain,
 )
 
@@ -67,6 +68,37 @@ def load_bridge_module():
 
 
 class CapabilityDiscoveryTests(unittest.TestCase):
+    def test_uses_configured_validation_commands(self):
+        self.assertIsNone(discover_validation_command(None))
+        self.assertIsNone(discover_validation_command("none"))
+        self.assertEqual(discover_validation_command("ha core check"), ["ha", "core", "check"])
+        self.assertEqual(
+            discover_validation_command(["python", "-m", "hass"]), ["python", "-m", "hass"]
+        )
+        self.assertIsNone(discover_validation_command([]))
+        self.assertEqual(
+            discover_validation_command("auto", command_exists=lambda name: name == "ha"),
+            ["ha", "core", "check"],
+        )
+
+    def test_discovers_explicit_addon_scope_paths(self):
+        with TemporaryDirectory(dir=CONFIG_TEMP_DIR) as tmp:
+            root = Path(tmp)
+            first = root / "first"
+            second = root / "second"
+            first.mkdir()
+            second.mkdir()
+
+            self.assertEqual(discover_addon_paths(None, candidates=[first]), [])
+            self.assertEqual(discover_addon_paths("none", candidates=[first]), [])
+            self.assertEqual(
+                discover_addon_paths([first, first, second]), [str(first), str(second)]
+            )
+            self.assertEqual(
+                discover_addon_paths(f" {first}, {second}, {root / 'missing'} "),
+                [str(first), str(second)],
+            )
+
     def test_discovers_first_available_validation_command(self):
         command = discover_validation_command(
             "auto",
@@ -542,6 +574,32 @@ class BridgeSdkRuntimeTests(unittest.TestCase):
 
 
 class CodexEventTests(unittest.TestCase):
+    def test_normalized_event_serializes_all_fields(self):
+        event = NormalizedEvent(
+            "action",
+            text="Run command",
+            session_id="session-1",
+            approval_id="approval-1",
+            command="ls",
+            cwd="/config",
+            file_changes=[{"status": "modified", "path": "configuration.yaml"}],
+            raw={"type": "test"},
+        )
+
+        self.assertEqual(
+            event.to_dict(),
+            {
+                "kind": "action",
+                "text": "Run command",
+                "session_id": "session-1",
+                "approval_id": "approval-1",
+                "command": "ls",
+                "cwd": "/config",
+                "file_changes": [{"status": "modified", "path": "configuration.yaml"}],
+                "raw": {"type": "test"},
+            },
+        )
+
     def test_normalizes_assistant_text_delta(self):
         event = normalize_event({"type": "agent_message_delta", "delta": "hello"})
 
@@ -728,6 +786,39 @@ class CodexEventTests(unittest.TestCase):
             normalize_event({"type": "unknown", "error": "plain error"}).text, "plain error"
         )
 
+    def test_extracts_nested_argument_commands_and_patch_text(self):
+        command_event = normalize_event(
+            {
+                "type": "tool.started",
+                "arguments": {"command": "cat configuration.yaml"},
+            }
+        )
+        self.assertEqual(command_event.kind, "action")
+        self.assertEqual(command_event.command, "cat configuration.yaml")
+
+        patch_event = normalize_event(
+            {
+                "type": "tool.started",
+                "tool_name": "functions.apply_patch",
+                "arguments": {
+                    "input": {
+                        "patch": (
+                            "*** Begin Patch\n"
+                            "*** Update File: configuration.yaml\n"
+                            "@@\n"
+                            "-old\n"
+                            "+new\n"
+                            "*** End Patch\n"
+                        )
+                    }
+                },
+            }
+        )
+        self.assertEqual(
+            patch_event.file_changes,
+            [{"status": "modified", "path": "configuration.yaml"}],
+        )
+
     def test_compact_raw_event_bounds_lists_and_ignores_non_object_roots(self):
         compacted = compact_raw_event({"items": list(range(55))})
 
@@ -737,6 +828,42 @@ class CodexEventTests(unittest.TestCase):
 
 
 class SessionModelTests(unittest.TestCase):
+    def test_storage_models_deserialize_optional_fields_and_ids(self):
+        approval = PendingApproval.from_dict({"command": "ha core check"})
+        self.assertEqual(approval.session_id, "")
+        self.assertEqual(approval.status, "pending")
+
+        validation = ValidationResult.from_dict(
+            {
+                "status": "passed",
+                "command": ["ha", "core", "check"],
+                "returncode": 0,
+                "summary": {"label": "Passed"},
+            }
+        )
+        self.assertEqual(validation.command, ["ha", "core", "check"])
+        self.assertEqual(validation.summary, {"label": "Passed"})
+
+        session = CodexSession.from_dict(
+            {
+                "messages": [
+                    {"id": 5, "role": "user", "content": "Hi"},
+                    {"role": "assistant", "content": "Hello"},
+                ],
+                "approvals": [{"id": "approval-1", "command": "cat configuration.yaml"}],
+                "validation": validation.to_dict(),
+                "archived": True,
+            }
+        )
+        self.assertEqual([message.id for message in session.messages], [5, 6])
+        self.assertGreaterEqual(session.next_message_id, 7)
+        self.assertIsNotNone(session.archived_at)
+        self.assertEqual(session.approvals[0].id, "approval-1")
+        self.assertEqual(session.validation.status, "passed")
+
+        session.assign_message_id(ChatMessage(id=10, role="assistant", content="Existing id"))
+        self.assertEqual(session.next_message_id, 11)
+
     def test_session_round_trips_through_storage_dict(self):
         session = CodexSession(
             id="local-session",
@@ -867,6 +994,23 @@ class RuntimeSettingsTests(unittest.TestCase):
         self.assertEqual(migrated["defaults"]["model_preset_id"], "gpt_5_5")
         self.assertNotIn("codex_default", {preset["id"] for preset in migrated["model_presets"]})
         self.assertIn("custom", {preset["id"] for preset in migrated["model_presets"]})
+        self.assertEqual(
+            update_settings(settings, {"defaults": {"model_preset_id": "codex_default"}})[
+                "defaults"
+            ]["model_preset_id"],
+            "gpt_5_5",
+        )
+        custom_current = update_settings(
+            settings,
+            {
+                "defaults": {"model_preset_id": "custom"},
+                "model_presets": [{"id": "custom", "label": "Custom", "model": "custom"}],
+            },
+        )
+        self.assertEqual(
+            update_settings(custom_current, {"model_presets": []})["defaults"]["model_preset_id"],
+            "gpt_5_5",
+        )
         with self.assertRaisesRegex(ValueError, "reasoning_effort"):
             update_settings(settings, {"defaults": {"reasoning_effort": "huge"}})
 
@@ -893,6 +1037,11 @@ class RuntimeSettingsTests(unittest.TestCase):
         self.assertEqual(manual["resolved"]["reasoning_effort"], "minimal")
         self.assertEqual(manual["resolved"]["plan_mode"], "off")
         self.assertEqual(manual["resolved"]["validation_depth"], "full")
+
+        modifying = resolve_run_settings("Add a helper", ["ignored"], defaults, None)
+        self.assertTrue(modifying["modifying"])
+        self.assertFalse(modifying["risky"])
+        self.assertEqual(modifying["resolved"]["validation_depth"], "full")
 
     def test_settings_normalization_rejects_invalid_values_and_preserves_safe_defaults(self):
         self.assertEqual(normalize_settings(None)["defaults"]["model_preset_id"], "gpt_5_5")
@@ -944,6 +1093,8 @@ class RuntimeSettingsTests(unittest.TestCase):
         self.assertTrue(is_safe_read_only_command("sed -n '1,40p' configuration.yaml"))
 
         self.assertFalse(is_safe_read_only_command(""))
+        self.assertFalse(is_safe_read_only_command("#"))
+        self.assertFalse(is_safe_read_only_command("pwd"))
         self.assertFalse(is_safe_read_only_command("sh -lc 'unterminated"))
         self.assertFalse(is_safe_read_only_command("git"))
         self.assertFalse(is_safe_read_only_command("git log --oneline"))
@@ -1088,6 +1239,41 @@ class RuntimeSettingsManagerTests(unittest.IsolatedAsyncioTestCase):
 
 
 class ValidationLabTests(unittest.TestCase):
+    def test_relevance_and_domain_mapping_cover_home_assistant_paths(self):
+        self.assertFalse(
+            build_validation_summary(ValidationResult(status="passed"), [])["restart_required"]
+        )
+        self.assertEqual(
+            build_validation_summary(
+                ValidationResult(status="passed", returncode=0),
+                [
+                    {"status": "modified", "path": ""},
+                    {"status": "modified", "path": "ui-lovelace.yaml"},
+                    {"status": "modified", "path": "dashboards/kitchen.yaml"},
+                    {"status": "modified", "path": "scenes.yaml"},
+                ],
+            )["affected_domains"],
+            [
+                {
+                    "id": "lovelace_www",
+                    "label": "Lovelace/www assets",
+                    "paths": ["ui-lovelace.yaml", "dashboards/kitchen.yaml"],
+                    "reloadable": False,
+                    "restart_required": False,
+                },
+                {
+                    "id": "scenes",
+                    "label": "Scenes",
+                    "paths": ["scenes.yaml"],
+                    "reloadable": True,
+                    "restart_required": False,
+                },
+            ],
+        )
+        self.assertFalse(is_ha_relevant_change(""))
+        self.assertTrue(is_ha_relevant_change("config/script.yml"))
+        self.assertTrue(is_ha_relevant_change("custom_components/example/manifest.json"))
+
     def test_failed_validation_recommends_fixing_errors_before_restart_or_reload(self):
         validation = ValidationResult(
             status="failed",
@@ -1196,6 +1382,24 @@ class ValidationLabManagerTests(unittest.IsolatedAsyncioTestCase):
 
 
 class SessionTitleTests(unittest.TestCase):
+    def test_summarized_title_handles_empty_stop_words_paths_and_trimming(self):
+        self.assertEqual(summarize_prompt_title(""), "New chat")
+        self.assertEqual(summarize_prompt_title("the and or to"), "The And Or To")
+        self.assertEqual(
+            summarize_prompt_title("update `custom_components/ha_codex/manager.py`"),
+            "custom_components/ha_codex/manager.py",
+        )
+        self.assertEqual(
+            summarize_prompt_title(
+                "create alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu"
+            ),
+            "Alpha Beta Gamma Delta Epsilon Zeta",
+        )
+        self.assertEqual(
+            summarize_prompt_title("create " + ("x" * 80)),
+            "X" + ("x" * 47),
+        )
+
     def test_summarizes_default_title_from_prompt(self):
         title = summarize_prompt_title(
             "use summarized titles for the chats instead of using the full prompt by default"
@@ -2640,6 +2844,68 @@ class GitOperationsHelperTests(unittest.IsolatedAsyncioTestCase):
                 generated_paths[0].with_suffix(f"{generated_paths[0].suffix}.pub").exists()
             )
 
+    async def test_git_setup_status_and_key_generation_failure_branches(self):
+        with TemporaryDirectory(dir=CONFIG_TEMP_DIR) as tmp:
+            root = Path(tmp)
+            manager = _FakeGitOpsManager(root)
+
+            manager.command_results = [_cmd(stdout="git version 2.50.0\n")]
+            status = await GitOperationsMixin.async_git_setup_status(manager)
+            self.assertFalse(status["repository"])
+            self.assertIn("No Git repository", status["repo_error"])
+
+            (root / ".git").mkdir()
+            manager.command_results = [
+                _cmd(stdout="git version 2.50.0\n"),
+                _cmd(stdout="false\n", stderr="not a repo"),
+            ]
+            status = await GitOperationsMixin.async_git_setup_status(manager)
+            self.assertFalse(status["repository"])
+            self.assertEqual(status["repo_error"], "not a repo")
+
+            manager.command_results = [
+                _cmd(stdout="git version 2.50.0\n"),
+                _cmd(stdout="true\n"),
+                _cmd(stdout=f"{root}\n"),
+                _cmd(ok=False),
+                _cmd(ok=False),
+                _cmd(stdout="origin/main\n"),
+                _cmd(stdout="bad\x1flog\nabc\x1fshort\x1fnot-time\x1fSubject\n"),
+                _cmd(stdout="not-a-number\n"),
+            ]
+            status = await GitOperationsMixin.async_git_setup_status(manager)
+            self.assertEqual(status["incoming_count"], 0)
+            self.assertEqual(status["history"][0]["timestamp"], 0)
+
+            async def prepare_failed(_target, *_args):
+                return {"ok": False, "returncode": None, "stdout": "", "stderr": "no chmod"}
+
+            manager.hass.async_add_executor_job = prepare_failed
+            result = await GitOperationsMixin.async_git_setup_generate_key(manager)
+            self.assertFalse(result["ok"])
+            self.assertEqual(result["step"], "prepare")
+
+            manager = _FakeGitOpsManager(root)
+            temporary_paths = []
+
+            async def keygen_failed(command, **_kwargs):
+                temporary_key = Path(command[-1])
+                temporary_paths.append(temporary_key)
+                temporary_key.write_text("private", encoding="utf-8")
+                temporary_key.with_suffix(f"{temporary_key.suffix}.pub").write_text(
+                    "public", encoding="utf-8"
+                )
+                return _cmd(ok=False, stderr="keygen failed", returncode=1)
+
+            manager._run_command = keygen_failed
+            result = await GitOperationsMixin.async_git_setup_generate_key(manager)
+            self.assertFalse(result["ok"])
+            self.assertEqual(result["step"], "generate_key")
+            self.assertFalse(temporary_paths[0].exists())
+            self.assertFalse(
+                temporary_paths[0].with_suffix(f"{temporary_paths[0].suffix}.pub").exists()
+            )
+
     async def test_git_setup_remote_and_pull_cover_fallback_branches(self):
         with TemporaryDirectory(dir=CONFIG_TEMP_DIR) as tmp:
             root = Path(tmp)
@@ -2713,6 +2979,80 @@ class GitOperationsHelperTests(unittest.IsolatedAsyncioTestCase):
 
             with self.assertRaises(ValueError):
                 await manager.async_git_setup_change_branch("-bad")
+
+    async def test_git_setup_branch_pull_and_checkout_error_paths(self):
+        with TemporaryDirectory(dir=CONFIG_TEMP_DIR) as tmp:
+            root = Path(tmp)
+            manager = _FakeGitOpsManager(root)
+
+            manager.status.update({"repository": False})
+            result = await manager.async_git_setup_change_branch("main")
+            self.assertEqual(result["step"], "setup")
+
+            manager.status.update(
+                {
+                    "repository": True,
+                    "remote_uses_ssh": True,
+                    "ssh_key_exists": False,
+                    "remote_configured": True,
+                }
+            )
+            result = await manager.async_git_setup_change_branch("main")
+            self.assertEqual(result["step"], "ssh_key")
+
+            manager.status.update({"remote_uses_ssh": False, "ssh_key_exists": False})
+            manager.command_results = [_cmd(ok=False, stderr="fetch failed")]
+            result = await manager.async_git_setup_change_branch("main")
+            self.assertEqual(result["step"], "fetch")
+
+            manager.status.update({"repository": False})
+            result = await manager.async_git_setup_checkout_commit("abc123")
+            self.assertEqual(result["step"], "setup")
+
+            manager.status.update({"repository": True})
+            manager.command_results = [_cmd(ok=False, stderr="bad commit")]
+            result = await manager.async_git_setup_checkout_commit("abc123")
+            self.assertEqual(result["step"], "verify")
+
+            manager.command_results = [_cmd(ok=True), _cmd(ok=False, stderr="restore failed")]
+            result = await manager.async_git_setup_checkout_commit("abc123")
+            self.assertEqual(result["step"], "restore")
+            self.assertFalse(result["ok"])
+
+            manager.status.update({"branch": ""})
+            manager.command_results = [
+                _cmd(ok=True),
+                _cmd(ok=True),
+                _cmd(ok=True, stdout="origin/main\n"),
+                _cmd(ok=True),
+                _cmd(ok=False),
+                _cmd(ok=False, stderr="checkout failed"),
+                _cmd(ok=False, stderr="checkout failed"),
+            ]
+            result = await manager.async_git_setup_pull()
+            self.assertEqual(result["step"], "checkout")
+            self.assertFalse(result["ok"])
+
+            manager.status.update({"branch": "main"})
+            manager.command_results = [
+                _cmd(ok=True),
+                _cmd(ok=True),
+                _cmd(stdout="not-a-number\n"),
+                _cmd(ok=True),
+            ]
+            result = await manager.async_git_setup_pull()
+            self.assertEqual(result["step"], "up_to_date")
+            self.assertTrue(result["ok"])
+
+            manager.command_results = [
+                _cmd(ok=True),
+                _cmd(ok=True),
+                _cmd(stdout="2\n"),
+                _cmd(ok=True),
+            ]
+            result = await manager.async_git_setup_pull()
+            self.assertEqual(result["step"], "pull")
+            self.assertTrue(result["ok"])
 
     async def test_git_setup_pull_commit_and_discard_failure_paths(self):
         with TemporaryDirectory(dir=CONFIG_TEMP_DIR) as tmp:
@@ -2797,6 +3137,227 @@ class GitOperationsHelperTests(unittest.IsolatedAsyncioTestCase):
             ]
             result = await manager.async_git_commit_push("Update", ["configuration.yaml"])
             self.assertEqual(result["step"], "commit")
+
+            manager.command_results = [
+                _cmd(stdout=manager.status_stdout),
+                _cmd(ok=False, stderr="add failed"),
+            ]
+            result = await manager.async_git_commit_push("Update", ["configuration.yaml"])
+            self.assertEqual(result["step"], "add")
+
+            manager.command_results = [
+                _cmd(stdout=manager.status_stdout),
+                _cmd(ok=True),
+                _cmd(ok=True),
+                _cmd(ok=False, stderr="push failed"),
+            ]
+            result = await manager.async_git_commit_push("Update", ["configuration.yaml"])
+            self.assertEqual(result["step"], "push")
+            self.assertFalse(result["ok"])
+
+    async def test_git_review_selection_file_diff_and_changes_edge_paths(self):
+        with TemporaryDirectory(dir=CONFIG_TEMP_DIR) as tmp:
+            root = Path(tmp)
+            (root / "configuration.yaml").write_text("new\n", encoding="utf-8")
+            manager = _FakeGitOpsManager(root)
+
+            manager.status_stdout = " M configuration.yaml\n"
+            manager.command_results = [_cmd(ok=False, stderr="status failed")]
+            with self.assertRaisesRegex(ValueError, "status failed"):
+                await manager._selected_git_review_files(["configuration.yaml"])
+
+            manager.command_results = [_cmd(stdout=manager.status_stdout)]
+            with self.assertRaisesRegex(ValueError, "not reviewable"):
+                await manager._selected_git_review_files(["missing.yaml"])
+
+            manager.command_results = [_cmd(stdout=manager.status_stdout)]
+            selected = await manager._selected_git_review_files(
+                ["configuration.yaml", {"path": "configuration.yaml"}]
+            )
+            self.assertEqual([item["path"] for item in selected], ["configuration.yaml"])
+
+            self.assertEqual(
+                manager._coerce_git_review_selection({"path": "new.yaml", "old_path": "old.yaml"}),
+                ("new.yaml", "old.yaml"),
+            )
+            for unsafe in ("", "/abs.yaml", "a\0b.yaml", "folder/../config.yaml", "."):
+                with self.assertRaises(ValueError):
+                    manager._safe_review_display_path(unsafe)
+
+            manager.head_paths = {"new.yaml"}
+            self.assertEqual(
+                manager._restore_pathspecs_for_selected_changes(
+                    [
+                        {
+                            "path": "renamed.yaml",
+                            "git_path": "renamed.yaml",
+                            "old_git_path": "old.yaml",
+                        },
+                        {"path": "added.yaml", "code": "??"},
+                        {"path": "new.yaml", "code": "??", "head_path": "new.yaml"},
+                    ]
+                ),
+                ["old.yaml", "new.yaml"],
+            )
+            self.assertEqual(
+                manager._untracked_changes_for_selected_discard(
+                    [
+                        {"path": "new.yaml", "code": "??"},
+                        {
+                            "path": "renamed.yaml",
+                            "git_path": "renamed.yaml",
+                            "old_git_path": "old.yaml",
+                        },
+                    ]
+                )[1]["path"],
+                "renamed.yaml",
+            )
+
+            manager.command_results = [_cmd(stdout=" M configuration.yaml\n")]
+            self.assertTrue((await manager.async_git_status())["ok"])
+            self.assertTrue((await manager.async_git_diff())["ok"])
+
+            manager.status_stdout = (
+                "D  homeassistant/configuration.yaml\n?? config/configuration.yaml\n"
+            )
+            manager.head_paths = {"homeassistant/configuration.yaml"}
+            manager.command_results = [
+                _cmd(stdout=manager.status_stdout),
+                _cmd(stdout="bad\n2\t1\tconfig/configuration.yaml\n"),
+                _cmd(stdout="old\n"),
+            ]
+            changes = await manager.async_git_changes()
+            self.assertTrue(changes["ok"])
+            self.assertEqual(changes["changed_count"], 1)
+
+            manager.status_stdout = " M configuration.yaml\n"
+            manager.head_paths = {"configuration.yaml"}
+            manager.command_results = [
+                _cmd(stdout=manager.status_stdout),
+                _cmd(ok=True, stdout=""),
+                _cmd(stdout="old\n"),
+            ]
+            diff = await manager.async_git_file_diff("configuration.yaml")
+            self.assertTrue(diff["ok"])
+            self.assertEqual(diff["added_lines"], 1)
+            self.assertEqual(diff["deleted_lines"], 1)
+
+            manager.command_results = [_cmd(stdout="old\n")]
+            (root / "missing.yaml").unlink(missing_ok=True)
+            diff = await manager._git_patch_against_head_file("head.yaml", "missing.yaml")
+            self.assertFalse(diff["ok"])
+
+    async def test_git_low_level_helpers_cover_paths_refs_and_commands(self):
+        with TemporaryDirectory(dir=CONFIG_TEMP_DIR) as tmp:
+            root = Path(tmp)
+            manager = _FakeGitOpsManager(root)
+
+            self.assertEqual(
+                manager._worktree_file_for_diff(str(root / "abs.yaml")), root / "abs.yaml"
+            )
+            nested = root / "homeassistant" / "nested.yaml"
+            nested.parent.mkdir()
+            nested.write_text("nested\n", encoding="utf-8")
+            self.assertEqual(manager._worktree_file_for_diff("nested.yaml"), nested)
+            self.assertEqual(
+                manager._patch_line_stats("--- a\n+++ b\n-old\n+new\n context"),
+                {"added_lines": 1, "deleted_lines": 1},
+            )
+
+            with self.assertRaises(ValueError):
+                manager._safe_git_commit_ref("")
+            with self.assertRaises(ValueError):
+                manager._safe_git_commit_ref("g" * 41)
+            self.assertEqual(manager._safe_git_commit_ref("ABC123"), "ABC123")
+
+            ssh_dir = root / ".ssh"
+            ssh_dir.mkdir()
+            (ssh_dir / "ha_codex_ed25519").write_text("private", encoding="utf-8")
+            self.assertIn("StrictHostKeyChecking=accept-new", manager._git_ssh_command())
+            self.assertIn("core.sshCommand", " ".join(manager._git_command(["status"])))
+
+            workspace_root = root / "workspace"
+            workspace_root.mkdir()
+            workspace_git = workspace_root / ".git-real"
+            workspace_git.mkdir()
+            workspace_manager = _FakeGitOpsManager(root)
+            workspace_manager.workspace_path = str(workspace_root)
+            command = workspace_manager._git_command(["status"])
+            self.assertIn(f"--git-dir={workspace_git}", command)
+
+            config_path = workspace_git / "config"
+            config_path.write_text("[core]\n\tworktree = ../wt\n", encoding="utf-8")
+            self.assertTrue(
+                workspace_manager._git_work_tree(workspace_git, workspace_root).endswith("wt")
+            )
+            config_path.write_text("[core\nbroken", encoding="utf-8")
+            self.assertEqual(
+                workspace_manager._git_config_value(config_path, "core", "worktree"), ""
+            )
+
+            with patch("custom_components.ha_codex.git_ops.subprocess.run") as run:
+                run.return_value = types.SimpleNamespace(returncode=0)
+                self.assertTrue(
+                    GitOperationsMixin._head_path_exists(workspace_manager, "configuration.yaml")
+                )
+
+            empty_command_manager = _FakeGitOpsManager(root)
+            empty_command_manager._git_command = lambda _args: ["git"]
+            self.assertEqual(empty_command_manager._git_work_tree_from_command(), str(root))
+
+            self.assertEqual(
+                manager._parse_git_numstat("1\t2\told => {nested/new}.yaml\n")["nested/new}.yaml"],
+                {"added_lines": 1, "deleted_lines": 2},
+            )
+
+    async def test_git_discard_and_default_branch_remaining_error_paths(self):
+        with TemporaryDirectory(dir=CONFIG_TEMP_DIR) as tmp:
+            root = Path(tmp)
+            manager = _FakeGitOpsManager(root)
+            manager.status_stdout = "?? new.yaml\n"
+
+            async def remove_failed(_files):
+                return _cmd(ok=False, stderr="remove failed", returncode=1)
+
+            manager._remove_untracked_review_files = remove_failed
+            manager.command_results = [_cmd(stdout=manager.status_stdout)]
+            result = await manager.async_git_discard(["new.yaml"])
+            self.assertEqual(result["step"], "remove")
+
+            manager = _FakeGitOpsManager(root)
+            manager.status_stdout = "?? new.yaml\n"
+
+            def unsafe_target(_path):
+                raise ValueError("unsafe path: new.yaml")
+
+            manager._safe_worktree_file_for_discard = unsafe_target
+            result = await manager._remove_untracked_review_files([{"path": "new.yaml"}])
+            self.assertFalse(result["ok"])
+            self.assertIn("unsafe path", result["stderr"])
+
+            manager = _FakeGitOpsManager(root)
+            target = root / "new.yaml"
+            target.write_text("new\n", encoding="utf-8")
+            manager._safe_worktree_file_for_discard = lambda _path: target
+            with patch.object(Path, "unlink", side_effect=OSError("cannot unlink")):
+                result = await manager._remove_untracked_review_files([{"path": "new.yaml"}])
+            self.assertFalse(result["ok"])
+            self.assertIn("cannot unlink", result["stderr"])
+
+            manager = _FakeGitOpsManager(root)
+            outside = Path("/outside/changed.yaml")
+            manager._worktree_file_for_diff = lambda _path: outside
+            with self.assertRaisesRegex(ValueError, "unsafe path"):
+                manager._safe_worktree_file_for_discard("changed.yaml")
+
+            manager = _FakeGitOpsManager(root)
+            manager.command_results = [
+                _cmd(ok=False),
+                _cmd(ok=False),
+                _cmd(ok=False),
+                _cmd(stdout="origin/HEAD\norigin/feature/test\n"),
+            ]
+            self.assertEqual(await manager._git_remote_default_branch(), "feature/test")
 
 
 class GitReviewOperationTests(unittest.IsolatedAsyncioTestCase):
@@ -3086,6 +3647,72 @@ class GitReviewOperationTests(unittest.IsolatedAsyncioTestCase):
 
 
 class RunCheckpointTests(unittest.IsolatedAsyncioTestCase):
+    async def test_rollback_marks_unavailable_checkpoints_blocked(self):
+        with TemporaryDirectory(dir=CONFIG_TEMP_DIR) as tmp:
+            root = Path(tmp)
+            manager = _make_manager(root)
+            manager.async_save = _async_noop
+            session = CodexSession(id="session-1")
+            checkpoint = {"id": "checkpoint-1", "status": "created", "targets": []}
+            session.metadata["rollback_checkpoints"] = [checkpoint]
+            session.messages.append(
+                ChatMessage(
+                    role="event",
+                    content="Rollback",
+                    metadata={"rollback": {"checkpoint_id": "checkpoint-1"}},
+                )
+            )
+            manager.sessions[session.id] = session
+
+            result = await manager.async_rollback_run(session.id, "checkpoint-1")
+
+            self.assertFalse(result["ok"])
+            self.assertEqual(checkpoint["rollback_status"], "blocked")
+            self.assertEqual(
+                session.messages[0].metadata["rollback"]["status"],
+                "blocked",
+            )
+            with self.assertRaisesRegex(ValueError, "Unknown rollback checkpoint"):
+                manager._find_checkpoint(session, "missing")
+
+    async def test_rollback_snapshot_helpers_cover_absent_binary_and_unavailable_states(self):
+        with TemporaryDirectory(dir=CONFIG_TEMP_DIR) as tmp:
+            root = Path(tmp)
+            manager = _make_manager(root)
+            binary = root / "binary.bin"
+            binary.write_bytes(b"\xff\x00")
+            large = root / "large.txt"
+            large.write_bytes(b"x" * 1_100_000)
+
+            self.assertEqual(
+                manager._file_snapshot_for_rollback("missing.yaml", True), {"state": "absent"}
+            )
+            self.assertEqual(
+                manager._file_snapshot_for_rollback("binary.bin", True)["encoding"], "base64"
+            )
+            self.assertEqual(
+                manager._file_snapshot_for_rollback("large.txt", True)["state"], "too_large"
+            )
+
+            target = root / "restore.yaml"
+            manager._restore_rollback_target("restore.yaml", {"state": "absent"})
+            self.assertFalse(target.exists())
+            with self.assertRaisesRegex(ValueError, "snapshot is unavailable"):
+                manager._restore_rollback_target("restore.yaml", {"state": "too_large"})
+            manager._restore_rollback_target(
+                "restore.yaml",
+                {"state": "file", "encoding": "base64", "content_b64": "dmFsdWU6IDEK"},
+            )
+            self.assertEqual(target.read_text(encoding="utf-8"), "value: 1\n")
+            self.assertEqual(
+                manager._rollback_head_path_candidates("configuration.yaml"),
+                [
+                    "configuration.yaml",
+                    "homeassistant/configuration.yaml",
+                    "config/configuration.yaml",
+                ],
+            )
+
     async def test_checkpoint_records_git_head_dirty_set_and_pre_run_snapshots(self):
         with TemporaryDirectory(dir=CONFIG_TEMP_DIR) as tmp:
             root, _remote = _create_git_repo(Path(tmp))
@@ -3319,10 +3946,18 @@ class BridgeControlTests(unittest.IsolatedAsyncioTestCase):
             async def packaged_failed(_hass=None):
                 return {"ok": False, "error": "cannot start"}
 
+            async def legacy_ok(_commands):
+                return {"ok": True, "stdout": "legacy restarted"}
+
+            bridge_control._async_start_packaged_bridge = packaged_failed
+            bridge_control._async_run_first_legacy_command = legacy_ok
+            result = await bridge_control.async_restart_bridge_service()
+            self.assertTrue(result["legacy_helper"])
+            self.assertEqual(result["stopped_pids"], [101, 102])
+
             async def legacy_failed(_commands):
                 return {"ok": False, "error": "cannot restart"}
 
-            bridge_control._async_start_packaged_bridge = packaged_failed
             bridge_control._async_run_first_legacy_command = legacy_failed
             result = await bridge_control.async_restart_bridge_service()
             self.assertFalse(result["ok"])
@@ -3388,6 +4023,7 @@ class BridgeControlTests(unittest.IsolatedAsyncioTestCase):
         original_create = bridge_control.asyncio.create_subprocess_exec
         original_health = bridge_control._async_bridge_health
         original_sleep = bridge_control.asyncio.sleep
+        original_monotonic = bridge_control.time.monotonic
         try:
 
             class FakeProcess:
@@ -3412,6 +4048,12 @@ class BridgeControlTests(unittest.IsolatedAsyncioTestCase):
             bridge_control.asyncio.create_subprocess_exec = pgrep_missing
             self.assertEqual(await bridge_control._async_bridge_pids(), [])
 
+            async def pgrep_error(*_args, **_kwargs):
+                return FakeProcess(2, b"999\n", b"error")
+
+            bridge_control.asyncio.create_subprocess_exec = pgrep_error
+            self.assertEqual(await bridge_control._async_bridge_pids(), [])
+
             attempts = []
 
             async def legacy_process(command, **_kwargs):
@@ -3430,6 +4072,11 @@ class BridgeControlTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(result["command"], "works")
             self.assertEqual(attempts, ["missing", "fails", "works"])
 
+            attempts.clear()
+            result = await bridge_control._async_run_first_legacy_command(("missing", "fails"))
+            self.assertFalse(result["ok"])
+            self.assertEqual(result["error"], "bad stderr")
+
             health_results = iter([{"ok": False}, {"ok": True, "status": 200}])
 
             async def health_sequence():
@@ -3443,10 +4090,20 @@ class BridgeControlTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(
                 await bridge_control._async_wait_for_bridge_health(), {"ok": True, "status": 200}
             )
+
+            bridge_control.time.monotonic = _sequence_function([0, 0, 11])
+            bridge_control._async_bridge_health = lambda: _async_value(
+                {"ok": False, "error": "down"}
+            )
+            self.assertEqual(
+                await bridge_control._async_wait_for_bridge_health(),
+                {"ok": False, "error": "down"},
+            )
         finally:
             bridge_control.asyncio.create_subprocess_exec = original_create
             bridge_control._async_bridge_health = original_health
             bridge_control.asyncio.sleep = original_sleep
+            bridge_control.time.monotonic = original_monotonic
 
     async def test_bridge_health_config_dir_and_stop_process_helpers_are_bounded(self):
         import custom_components.ha_codex.bridge_control as bridge_control
@@ -3457,6 +4114,8 @@ class BridgeControlTests(unittest.IsolatedAsyncioTestCase):
         original_kill = bridge_control.os.kill
         original_exists = bridge_control._pid_exists
         original_sleep = bridge_control.asyncio.sleep
+        original_monotonic = bridge_control.time.monotonic
+        original_script = bridge_control.BRIDGE_SCRIPT
         try:
 
             class FakeResponse:
@@ -3482,6 +4141,16 @@ class BridgeControlTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn("offline", result["error"])
 
             self.assertEqual(bridge_control._config_dir(_FakeHass("/config")), Path("/config"))
+            with TemporaryDirectory() as tmp:
+                script = Path(tmp) / "one" / "two" / "three" / "bridge.py"
+                script.parent.mkdir(parents=True)
+                bridge_control.BRIDGE_SCRIPT = script
+                self.assertEqual(bridge_control._config_dir(None), script.parents[3])
+                root = Path(tmp) / "ha"
+                integration = root / "custom_components" / "ha_codex"
+                integration.mkdir(parents=True)
+                bridge_control.BRIDGE_SCRIPT = integration / "bridge" / "ha_codex_bridge.py"
+                self.assertEqual(bridge_control._config_dir(None), root)
 
             async def pids():
                 return [999, 1000]
@@ -3497,7 +4166,37 @@ class BridgeControlTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(killed, [(1000, bridge_control.signal.SIGTERM)])
 
             bridge_control.os.kill = lambda _pid, _sig: (_ for _ in ()).throw(ProcessLookupError())
+            bridge_control._pid_exists = original_exists
             self.assertEqual(bridge_control._pid_exists(123), False)
+
+            bridge_control.os.kill = lambda _pid, _sig: (_ for _ in ()).throw(OSError("denied"))
+            self.assertTrue(bridge_control._pid_exists(123))
+
+            bridge_control.os.kill = lambda _pid, _sig: None
+            self.assertTrue(bridge_control._pid_exists(123))
+
+            async def stubborn_pids():
+                return [1001, 1002, 1003]
+
+            killed = []
+
+            def kill_sequence(pid, sig):
+                killed.append((pid, sig))
+                if pid == 1001:
+                    raise ProcessLookupError()
+                if pid == 1002:
+                    raise OSError("denied")
+                if sig == bridge_control.signal.SIGKILL:
+                    raise OSError("cannot kill")
+
+            bridge_control._async_bridge_pids = stubborn_pids
+            bridge_control.os.getpid = lambda: 999
+            bridge_control.os.kill = kill_sequence
+            bridge_control._pid_exists = lambda _pid: True
+            bridge_control.time.monotonic = _sequence_function([0, 0, 6])
+            result = await bridge_control._async_stop_bridge_processes()
+            self.assertEqual(result["pids"], [1003])
+            self.assertIn((1003, bridge_control.signal.SIGKILL), killed)
         finally:
             bridge_control.urlopen = original_urlopen
             bridge_control._async_bridge_pids = original_pids
@@ -3505,6 +4204,8 @@ class BridgeControlTests(unittest.IsolatedAsyncioTestCase):
             bridge_control.os.kill = original_kill
             bridge_control._pid_exists = original_exists
             bridge_control.asyncio.sleep = original_sleep
+            bridge_control.time.monotonic = original_monotonic
+            bridge_control.BRIDGE_SCRIPT = original_script
 
 
 class WebsocketCommandTests(unittest.IsolatedAsyncioTestCase):
@@ -3773,8 +4474,313 @@ class WebsocketCommandTests(unittest.IsolatedAsyncioTestCase):
                 {"id": 3, "path": "../secrets.yaml"},
             )
 
+    async def test_websocket_value_error_wrappers_raise_homeassistant_error(self):
+        websocket = _load_websocket_module()
+        manager = _FakeWebsocketManager()
+        websocket.CodexManager = _FakeWebsocketManager
+        hass = types.SimpleNamespace(data={websocket.DOMAIN: manager})
+        connection = _FakeConnection()
+
+        async def async_value_error(*_args, **_kwargs):
+            raise ValueError("wrapped async error")
+
+        def sync_value_error(*_args, **_kwargs):
+            raise ValueError("wrapped sync error")
+
+        cases = [
+            (
+                "get_message",
+                sync_value_error,
+                websocket.websocket_sessions_message,
+                {"id": 10, "session_id": "session-1", "message_id": 1},
+                False,
+            ),
+            (
+                "messages_after",
+                sync_value_error,
+                websocket.websocket_sessions_messages_after,
+                {"id": 11, "session_id": "session-1", "after_id": 0, "limit": None},
+                False,
+            ),
+            (
+                "async_send",
+                async_value_error,
+                websocket.websocket_sessions_send,
+                {"id": 12, "session_id": "session-1", "prompt": "x", "context": []},
+                True,
+            ),
+            (
+                "async_update_session_run_settings",
+                async_value_error,
+                websocket.websocket_sessions_run_settings_update,
+                {"id": 13, "session_id": "session-1", "run_settings": {}},
+                True,
+            ),
+            (
+                "async_respond_run_plan",
+                async_value_error,
+                websocket.websocket_sessions_run_plan_respond,
+                {"id": 14, "session_id": "session-1", "plan_id": "plan-1", "action": "approve"},
+                True,
+            ),
+            (
+                "async_rollback_run",
+                async_value_error,
+                websocket.websocket_sessions_rollback_run,
+                {"id": 15, "session_id": "session-1", "checkpoint_id": "checkpoint-1"},
+                True,
+            ),
+            (
+                "async_steer",
+                async_value_error,
+                websocket.websocket_sessions_steer,
+                {"id": 16, "session_id": "session-1", "prompt": "x", "context": []},
+                True,
+            ),
+            (
+                "async_retry_continue",
+                async_value_error,
+                websocket.websocket_sessions_retry_continue,
+                {"id": 17, "session_id": "session-1"},
+                True,
+            ),
+            (
+                "async_cancel",
+                async_value_error,
+                websocket.websocket_sessions_cancel,
+                {"id": 18, "session_id": "session-1"},
+                True,
+            ),
+            (
+                "async_rename",
+                async_value_error,
+                websocket.websocket_sessions_rename,
+                {"id": 19, "session_id": "session-1", "title": "x"},
+                True,
+            ),
+            (
+                "async_archive",
+                async_value_error,
+                websocket.websocket_sessions_archive,
+                {"id": 20, "session_id": "session-1", "archived": True},
+                True,
+            ),
+            (
+                "async_respond_approval",
+                async_value_error,
+                websocket.websocket_approvals_respond,
+                {
+                    "id": 21,
+                    "session_id": "session-1",
+                    "approval_id": "approval-1",
+                    "approved": True,
+                },
+                True,
+            ),
+            (
+                "async_git_setup_set_remote",
+                async_value_error,
+                websocket.websocket_git_setup_set_remote,
+                {"id": 22, "remote_url": ""},
+                True,
+            ),
+            (
+                "async_git_setup_change_branch",
+                async_value_error,
+                websocket.websocket_git_setup_change_branch,
+                {"id": 23, "branch": ""},
+                True,
+            ),
+            (
+                "async_git_setup_checkout_commit",
+                async_value_error,
+                websocket.websocket_git_setup_checkout_commit,
+                {"id": 24, "commit": ""},
+                True,
+            ),
+            (
+                "async_git_commit_push",
+                async_value_error,
+                websocket.websocket_git_commit_push,
+                {"id": 25, "message": "", "files": []},
+                True,
+            ),
+            (
+                "async_git_discard",
+                async_value_error,
+                websocket.websocket_git_discard,
+                {"id": 26, "files": []},
+                True,
+            ),
+            (
+                "async_reload_validation_domains",
+                async_value_error,
+                websocket.websocket_validation_reload,
+                {"id": 27, "domains": []},
+                True,
+            ),
+        ]
+
+        for attr, replacement, handler, msg, is_async in cases:
+            original = getattr(manager, attr)
+            setattr(manager, attr, replacement)
+            try:
+                with self.assertRaises(websocket.HomeAssistantError):
+                    if is_async:
+                        await handler(hass, connection, msg)
+                    else:
+                        handler(hass, connection, msg)
+            finally:
+                setattr(manager, attr, original)
+
 
 class ManagerUtilityTests(unittest.IsolatedAsyncioTestCase):
+    async def test_manager_session_payloads_questions_and_message_helpers(self):
+        with TemporaryDirectory(dir=CONFIG_TEMP_DIR) as tmp:
+            manager = _make_manager(Path(tmp))
+            manager.async_save = _async_noop
+            session = CodexSession(id="session-1", title="Question")
+            manager.sessions[session.id] = session
+            first = manager._append_message(session, ChatMessage(role="assistant", content="same"))
+            duplicate = manager._append_message(
+                session, ChatMessage(role="assistant", content=" same ")
+            )
+            self.assertIs(first, duplicate)
+            manager._append_message(session, ChatMessage(role="user", content="Hello"))
+            manager._append_message(session, ChatMessage(role="assistant", content="World"))
+
+            self.assertEqual(manager.get_message(session.id, 1)["content"], "same")
+            with self.assertRaisesRegex(ValueError, "Unknown message"):
+                manager.get_message(session.id, 99)
+            self.assertEqual(manager.last_message_id(session.id), 3)
+            self.assertEqual(len(manager.messages_after(session.id, "bad")), 3)
+            self.assertEqual(manager.messages_after(session.id, 0, 0), [])
+            self.assertEqual(len(manager.messages_after(session.id, 0, "bad")), 3)
+            self.assertEqual(len(manager.messages_after(session.id, 0, 2)), 2)
+            self.assertEqual(manager.list_sessions()[0]["id"], session.id)
+            self.assertEqual(
+                manager.session_payload(session, include_messages=True)["messages"][0]["content"],
+                "same",
+            )
+            with self.assertRaisesRegex(ValueError, "Unknown session"):
+                manager._require_session("missing")
+
+            question = ChatMessage(
+                role="assistant",
+                content=(
+                    "Before\n"
+                    "<ha_codex_question>"
+                    '{"question":"Pick","choices":[{"label":"A"},{"label":"B"},{"label":"C"}]}'
+                    "</ha_codex_question>"
+                ),
+            )
+            session.messages = [question]
+            self.assertTrue(manager._has_pending_question(session))
+            self.assertTrue(
+                manager._pending_question_content(question.content).startswith(
+                    "<ha_codex_question>"
+                )
+            )
+            self.assertFalse(
+                manager._has_pending_question(CodexSession(status="running", messages=[question]))
+            )
+            for bad in [
+                "<ha_codex_question>not-json</ha_codex_question>",
+                '<ha_codex_question>{"question":"","choices":[{"label":"A"},{"label":"B"},{"label":"C"}]}</ha_codex_question>',
+                '<ha_codex_question>{"question":"Pick","choices":[{"label":"A"}]}</ha_codex_question>',
+                '<ha_codex_question>{"question":"Pick","choices":[{"label":""},{"label":"B"},{"label":"C"}]}</ha_codex_question>',
+                '<ha_codex_question>{"question":"Pick","choices":[{"label":"A"},{"label":"B"},{"label":"C"}]}</ha_codex_question> trailing',
+            ]:
+                self.assertIsNone(manager._extract_pending_question(bad))
+
+            event_message = ChatMessage(
+                role="event",
+                content=question.content,
+                metadata={"kind": "run_finished"},
+            )
+            self.assertTrue(manager._message_can_contain_question(event_message))
+            self.assertEqual(
+                manager._pending_question_content("No question").strip(), "No question"
+            )
+
+            manager._fire_session_updated(session, include_messages=True)
+            manager._flush_session_updated(session.id)
+            self.assertEqual(manager.hass.bus.events[-1][0], "ha_codex/session_updated")
+            manager._cancel_pending_session_update(session.id)
+            manager.sessions.pop(session.id)
+            manager._flush_session_updated(session.id)
+
+    async def test_manager_run_plan_and_error_helper_branches(self):
+        with TemporaryDirectory(dir=CONFIG_TEMP_DIR) as tmp:
+            manager = _make_manager(Path(tmp))
+            session = CodexSession(id="session-1")
+            manager.sessions[session.id] = session
+
+            self.assertTrue(
+                manager._requires_run_plan(
+                    "Update configuration.yaml", {"resolved": {"plan_mode": "always"}}
+                )
+            )
+            self.assertFalse(
+                manager._requires_run_plan(
+                    "Answer to your question: yes", {"resolved": {"plan_mode": "always"}}
+                )
+            )
+            self.assertTrue(
+                manager._requires_run_plan(
+                    "Update configuration.yaml", {"resolved": {"plan_mode": "auto"}, "risky": True}
+                )
+            )
+            self.assertIn("User request", manager._compose_run_plan_prompt("Fix it"))
+            plan = {
+                "prompt": "Fix it",
+                "question_answers": [{"content": "Use YAML"}],
+                "content": "",
+            }
+            self.assertIn("User answer:\nUse YAML", manager._run_plan_prompt(plan))
+            self.assertIn(
+                "(no plan text captured)", manager._approved_run_prompt({"prompt": "Fix it"})
+            )
+
+            self.assertEqual(manager._session_run_plans(session), [])
+            self.assertIsNone(manager._pending_run_plan(session))
+            with self.assertRaisesRegex(ValueError, "Unknown run plan"):
+                manager._require_pending_run_plan(session, "missing")
+            session.metadata["pending_plan"] = {"id": "plan-1", "status": "approved"}
+            with self.assertRaisesRegex(ValueError, "not awaiting"):
+                manager._require_pending_run_plan(session, "plan-1")
+
+            self.assertEqual(
+                manager._unknown_error_text(NormalizedEvent("error", raw={"returncode": 2})),
+                "Codex reported an error without additional details. Codex exited with code 2.",
+            )
+            self.assertEqual(
+                manager._unknown_error_text(NormalizedEvent("error", raw={"type": "oops"})),
+                "Codex reported an error without additional details. Event type: oops.",
+            )
+            self.assertIn(
+                "stale-thread",
+                manager._fresh_thread_recovery_prompt(
+                    CodexSession(
+                        messages=[
+                            ChatMessage(role="user", content="One"),
+                            ChatMessage(role="assistant", content="Two"),
+                        ]
+                    ),
+                    "Continue",
+                    "stale-thread",
+                ),
+            )
+
+            event = NormalizedEvent(
+                "run_finished", text="<ha_codex_question>{}</ha_codex_question>"
+            )
+            self.assertEqual(manager._message_for_event(event).role, "assistant")
+            self.assertIsNone(manager._message_for_event(NormalizedEvent("raw")))
+            self.assertTrue(manager._same_message_content(" done ", "done"))
+            result = await manager._run_command(["missing-ha-codex-command"], cwd=None, timeout=1)
+            self.assertFalse(result["ok"])
+
     async def test_settings_probe_bridge_and_restart_helpers(self):
         import custom_components.ha_codex.manager as manager_module
 
@@ -3976,6 +4982,30 @@ class ManagerUtilityTests(unittest.IsolatedAsyncioTestCase):
             else:
                 sys.modules["aiohttp"] = original_aiohttp
 
+    async def test_usage_status_reports_client_errors(self):
+        manager = CodexManager(
+            _FakeHass("/tmp"),
+            store=None,
+            workspace_path="/homeassistant",
+            codex_command="codex",
+            bridge_url="http://127.0.0.1:8765",
+            addon_write_scope=None,
+            validation_command=None,
+        )
+        original_aiohttp = sys.modules.get("aiohttp")
+        aiohttp, responses = _install_aiohttp_json_stub([{"raise": None}])
+        responses[0]["raise"] = aiohttp.ClientError("usage offline")
+        try:
+            result = await manager._async_usage_status()
+        finally:
+            if original_aiohttp is None:
+                sys.modules.pop("aiohttp", None)
+            else:
+                sys.modules["aiohttp"] = original_aiohttp
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["error"], "usage offline")
+
     async def test_session_lifecycle_error_and_retry_paths(self):
         with TemporaryDirectory(dir=CONFIG_TEMP_DIR) as tmp:
             manager = _make_manager(Path(tmp))
@@ -4033,6 +5063,249 @@ class ManagerUtilityTests(unittest.IsolatedAsyncioTestCase):
             await manager.async_delete(session.id)
             self.assertTrue(task.cancelled)
             self.assertNotIn(session.id, manager.sessions)
+
+    async def test_manager_active_guard_and_waiter_paths(self):
+        with TemporaryDirectory(dir=CONFIG_TEMP_DIR) as tmp:
+            manager = _make_manager(Path(tmp))
+            manager.async_save = _async_noop
+            manager._fire_session_updated = lambda *_args, **_kwargs: None
+            session = CodexSession(
+                id="session-1", messages=[ChatMessage(role="user", content="Fix")]
+            )
+            manager.sessions[session.id] = session
+
+            manager.tasks[session.id] = _FakeTask()
+            with self.assertRaisesRegex(ValueError, "active run"):
+                await manager.async_send(session.id, "hello")
+
+            plan = {"id": "plan-1", "status": "pending", "prompt": "Fix", "content": "Plan"}
+            session.metadata["pending_plan"] = plan
+            with self.assertRaisesRegex(ValueError, "still being generated"):
+                await manager.async_respond_run_plan(session.id, "plan-1", "approve")
+            manager.tasks.pop(session.id, None)
+            with self.assertRaisesRegex(ValueError, "approve, cancel, or revise"):
+                await manager.async_respond_run_plan(session.id, "plan-1", "bad")
+            with self.assertRaisesRegex(ValueError, "awaiting approval"):
+                await manager._async_answer_run_plan_question(session, plan, "answer", {})
+            session.metadata.pop("pending_plan", None)
+
+            manager.tasks[session.id] = _FakeTask()
+            await manager.async_steer(
+                session.id,
+                "continue",
+                run_settings={"mode": "manual", "verbosity": "high"},
+            )
+            self.assertEqual(
+                session.messages[-1].metadata["run_settings"]["requested"]["verbosity"],
+                "high",
+            )
+
+            session.status = "error"
+            with self.assertRaisesRegex(ValueError, "active run"):
+                await manager.async_retry_continue(session.id)
+
+            task = _FakeTask()
+            manager.tasks[session.id] = task
+            archived = await manager.async_archive(session.id, True)
+            self.assertIs(archived, session)
+            self.assertTrue(task.cancelled)
+            self.assertEqual(session.status, "canceled")
+
+            manager.tasks.pop(session.id, None)
+            approval = PendingApproval(
+                id="approval-1",
+                session_id=session.id,
+                command="cat configuration.yaml",
+            )
+            session.approvals = [approval]
+            waiter = asyncio.get_running_loop().create_future()
+            manager.approval_waiters[approval.id] = waiter
+            await manager.async_respond_approval(session.id, approval.id, True)
+            self.assertTrue(waiter.result())
+            self.assertEqual(session.status, "running")
+
+            calls = []
+
+            async def record_command(command, *, cwd, timeout, ok_returncodes=None):
+                calls.append((command, cwd, timeout, ok_returncodes))
+                return _cmd(stdout="ok\n")
+
+            manager._run_command = record_command
+            await manager._run_small_command(["codex", "--version"])
+            await manager._run_workspace_command(["git", "status"])
+            self.assertEqual(calls[0][1:3], (None, 10))
+            self.assertEqual(calls[1][1:3], (manager.workspace_path, 120))
+
+    async def test_manager_runtime_fallbacks_approval_wait_and_cancellation_paths(self):
+        import custom_components.ha_codex.manager as manager_module
+
+        original_codex_cli_bin = sys.modules.get("codex_cli_bin")
+        fake_codex_cli_bin = types.ModuleType("codex_cli_bin")
+        fake_codex_cli_bin.bundled_codex_path = lambda: "/sdk/codex"
+        sys.modules["codex_cli_bin"] = fake_codex_cli_bin
+        try:
+            self.assertEqual(manager_module.bundled_codex_path(), "/sdk/codex")
+            fake_codex_cli_bin.bundled_codex_path = lambda: (_ for _ in ()).throw(ValueError("bad"))
+            self.assertIsNone(manager_module.bundled_codex_path())
+            sys.modules.pop("codex_cli_bin", None)
+            self.assertIsNone(manager_module.bundled_codex_path())
+        finally:
+            if original_codex_cli_bin is None:
+                sys.modules.pop("codex_cli_bin", None)
+            else:
+                sys.modules["codex_cli_bin"] = original_codex_cli_bin
+
+        with TemporaryDirectory(dir=CONFIG_TEMP_DIR) as tmp:
+            root = Path(tmp)
+            manager = _make_manager(root)
+            manager.async_save = _async_noop
+            log = root / "ha_codex_bridge.log"
+            log.write_bytes(b"first\n" + (b"x" * 210_000) + b"\nlast\n")
+            bridge_log = await manager.async_bridge_log(1)
+            self.assertTrue(bridge_log["truncated"])
+            self.assertIn("last", bridge_log["lines"])
+
+            with (
+                patch.object(Path, "exists", return_value=True),
+                patch.object(Path, "stat", side_effect=OSError("cannot stat")),
+            ):
+                failed_log = await manager.async_bridge_log(1)
+            self.assertIn("cannot stat", failed_log["error"])
+
+            with patch.object(Path, "write_text", side_effect=OSError("cannot clear")):
+                failed_clear = await manager.async_clear_bridge_log()
+            self.assertIn("cannot clear", failed_clear["error"])
+
+            manager.hass.loop = types.SimpleNamespace(time=_sequence_function([0, 0, 11]))
+            manager._async_bridge_health_status = lambda: _async_value(
+                {"ok": False, "error": "still down"}
+            )
+            with patch("custom_components.ha_codex.manager.asyncio.sleep", _async_noop):
+                self.assertEqual(
+                    await manager._async_wait_for_bridge_health(),
+                    {"ok": False, "error": "still down"},
+                )
+                manager.hass.loop = types.SimpleNamespace(time=_sequence_function([0, 0]))
+                manager._async_bridge_health_status = lambda: _async_value(
+                    {"ok": True, "status": 200}
+                )
+                self.assertEqual(
+                    await manager._async_wait_for_bridge_health(),
+                    {"ok": True, "status": 200},
+                )
+            manager.hass.loop = _FakeLoop()
+
+            original_restart_bridge = manager_module.async_restart_bridge_service
+            try:
+                manager_module.async_restart_bridge_service = lambda _hass: _async_value(
+                    {"ok": True, "pid": 42}
+                )
+                self.assertEqual((await manager.async_restart_bridge())["pid"], 42)
+            finally:
+                manager_module.async_restart_bridge_service = original_restart_bridge
+
+            session = CodexSession(id="session-1", status="running")
+            manager.sessions[session.id] = session
+            approval_task = asyncio.create_task(
+                manager._async_wait_for_approval(
+                    session.id,
+                    "approval-1",
+                    "python script.py",
+                    str(root),
+                )
+            )
+            await asyncio.sleep(0)
+            self.assertEqual(session.status, "waiting_approval")
+            await manager.async_respond_approval(session.id, "approval-1", True)
+            self.assertTrue(await approval_task)
+
+            plan = {
+                "id": "plan-1",
+                "status": "planning",
+                "prompt": "Fix",
+                "content": "",
+                "run_settings": {},
+            }
+            session.metadata["pending_plan"] = plan
+            approval = PendingApproval(id="plan-approval", session_id=session.id, command="cat")
+            session.approvals = [approval]
+            manager.approval_waiters[approval.id] = asyncio.get_running_loop().create_future()
+            manager.runner = _FailingRunner(asyncio.CancelledError())
+            with self.assertRaises(asyncio.CancelledError):
+                await manager._async_run_plan(session.id, plan["id"])
+            self.assertEqual(plan["status"], "canceled")
+            self.assertNotIn(approval.id, manager.approval_waiters)
+
+            session.status = "running"
+            approval = PendingApproval(id="run-approval", session_id=session.id, command="cat")
+            session.approvals = [approval]
+            manager.approval_waiters[approval.id] = asyncio.get_running_loop().create_future()
+            manager.runner = _FailingRunner(asyncio.CancelledError())
+            with self.assertRaises(asyncio.CancelledError):
+                await manager._async_run_session(session.id, "prompt")
+            self.assertEqual(session.status, "canceled")
+
+            session.status = "running"
+            session.approvals = []
+            manager.runner = _FailingRunner(RuntimeError())
+            await manager._async_run_session(session.id, "prompt")
+            self.assertEqual(session.status, "error")
+            self.assertIn("RuntimeError", session.messages[-1].content)
+
+            self.assertTrue(manager._requires_run_plan("Update configuration.yaml"))
+            self.assertEqual(
+                manager._unknown_error_text(NormalizedEvent("error", raw={})),
+                "Codex reported an error without additional details.",
+            )
+            question_content = (
+                '<ha_codex_question>{"question":"Old","choices":[{"label":"A"},'
+                '{"label":"B"},{"label":"C"}]}</ha_codex_question> trailing '
+                '<ha_codex_question>{"question":"New","choices":[{"label":"A"},'
+                '{"label":"B"},{"label":"C"}]}</ha_codex_question>'
+            )
+            self.assertIn("New", manager._pending_question_content(question_content))
+
+    async def test_file_change_summary_helpers_cover_edge_paths(self):
+        with TemporaryDirectory(dir=CONFIG_TEMP_DIR) as tmp:
+            root = Path(tmp)
+            manager = _make_manager(root)
+            manager.async_save = _async_noop
+            session = CodexSession(id="session-1")
+            manager.sessions[session.id] = session
+            config_file = root / "configuration.yaml"
+            config_file.write_text("before\n", encoding="utf-8")
+            manager.file_change_baselines[session.id] = manager._workspace_file_snapshot()
+            config_file.write_text("after\n", encoding="utf-8")
+            manager._async_complete_active_rollback_checkpoint = lambda *_args: _async_value(
+                {"id": "checkpoint-1"}
+            )
+
+            changes = await manager._async_append_file_change_summary(session.id)
+
+            self.assertEqual(changes[0]["status"], "modified")
+            self.assertEqual(session.messages[-1].metadata["rollback"]["id"], "checkpoint-1")
+            self.assertIn(
+                "1 more files changed",
+                manager._format_file_change_summary(
+                    [{"status": "modified", "path": "one.yaml"}], hidden_count=1
+                ),
+            )
+            self.assertEqual(
+                manager._changed_workspace_files({str(config_file): (1, 1)}, {}),
+                [{"status": "deleted", "path": "configuration.yaml"}],
+            )
+
+            snapshot = {}
+            manager._add_workspace_snapshot_root(snapshot, config_file)
+            self.assertIn(str(config_file), snapshot)
+
+            original_add_root = manager._add_workspace_snapshot_root
+            try:
+                manager._add_workspace_snapshot_root = lambda *_args: None
+                with patch.object(Path, "resolve", side_effect=OSError("cannot resolve")):
+                    self.assertEqual(manager._workspace_file_snapshot(), {})
+            finally:
+                manager._add_workspace_snapshot_root = original_add_root
 
     async def test_validation_reload_message_and_command_helpers(self):
         with TemporaryDirectory(dir=CONFIG_TEMP_DIR) as tmp:
@@ -4112,6 +5385,116 @@ class ManagerUtilityTests(unittest.IsolatedAsyncioTestCase):
 
 
 class ContextTests(unittest.IsolatedAsyncioTestCase):
+    async def test_context_edge_cases_for_paths_limits_and_logs(self):
+        with TemporaryDirectory(dir=CONFIG_TEMP_DIR) as tmp:
+            root = Path(tmp)
+            config_file = root / "configuration.yaml"
+            config_file.write_text("homeassistant:\n", encoding="utf-8")
+            (root / "hidden").mkdir()
+            (root / ".hidden").mkdir()
+            (root / ".hidden" / "ignored.yaml").write_text("ignored\n", encoding="utf-8")
+            (root / "trace.log").write_text("log\n", encoding="utf-8")
+            manager = _make_manager(root)
+
+            many_items = [
+                {"kind": "entity", "id": f"sensor.{index}", "label": f"Sensor {index}"}
+                for index in range(30)
+            ]
+            attachments, serialized = manager._prepare_context_attachments(many_items)
+            self.assertEqual(len(attachments), 20)
+            self.assertIn("Sensor 19", serialized)
+            self.assertNotIn("Sensor 20", serialized)
+
+            with self.assertRaisesRegex(ValueError, "required"):
+                manager._resolve_context_config_file("")
+            with self.assertRaisesRegex(ValueError, "outside"):
+                manager._resolve_context_config_file(str(config_file))
+            with self.assertRaisesRegex(ValueError, "not available"):
+                manager._resolve_context_config_file("missing.yaml")
+
+            self.assertEqual(
+                manager._display_context_path(root.parent / "outside.yaml"),
+                str(root.parent / "outside.yaml"),
+            )
+            self.assertFalse(manager._is_context_config_file(root / ".hidden" / "ignored.yaml"))
+            self.assertFalse(manager._is_context_config_file(root / "trace.log"))
+            self.assertEqual(manager._context_text("x" * 600, max_length=10), "xxxxxxxxxx")
+            self.assertEqual(manager._serialize_context_items([]), "")
+            missing_log = manager._read_context_tail(root / "missing.log", 2, 100)
+            self.assertFalse(missing_log["exists"])
+
+    async def test_context_helper_error_and_limit_branches(self):
+        import custom_components.ha_codex.context as context_module
+
+        with TemporaryDirectory(dir=CONFIG_TEMP_DIR) as tmp:
+            root = Path(tmp)
+            manager = _make_manager(root)
+            (root / "one.yaml").write_text("one\n", encoding="utf-8")
+            (root / "two.yaml").write_text("two\n", encoding="utf-8")
+
+            original_max = context_module._CONFIG_FILE_MAX_COUNT
+            try:
+                context_module._CONFIG_FILE_MAX_COUNT = 1
+                self.assertEqual(len(manager._context_config_files()["files"]), 1)
+            finally:
+                context_module._CONFIG_FILE_MAX_COUNT = original_max
+
+            missing_manager = _make_manager(root)
+            missing_manager.workspace_path = str(root / "missing")
+            self.assertTrue(missing_manager._context_config_files()["files"])
+
+            manager.workspace_path = str(root / "workspace")
+            with patch.object(Path, "resolve", side_effect=OSError("cannot resolve")):
+                self.assertEqual(
+                    manager._context_roots(),
+                    [Path(manager.workspace_path), Path(root)],
+                )
+            manager.workspace_path = str(root)
+
+            with patch.object(Path, "open", side_effect=OSError("cannot read")):
+                with self.assertRaisesRegex(ValueError, "Unable to read config file"):
+                    manager._context_config_file("one.yaml")
+
+            log_path = root / "home-assistant.log"
+            log_path.write_text("first\n" + ("x" * 5000) + "\nlast\n", encoding="utf-8")
+            tail = manager._read_context_tail(log_path, lines=1, max_bytes=100)
+            self.assertTrue(tail["truncated"])
+            self.assertEqual(tail["line_count"], 1)
+
+            with (
+                patch.object(Path, "exists", return_value=True),
+                patch.object(Path, "stat", side_effect=OSError("cannot stat")),
+            ):
+                failed_tail = manager._read_context_tail(log_path, lines=1, max_bytes=100)
+            self.assertTrue(failed_tail["exists"])
+            self.assertIn("cannot stat", failed_tail["error"])
+
+            self.assertIsNone(manager._prepare_config_file_context_item({}, "", "Config"))
+            self.assertIsNone(
+                manager._prepare_config_file_context_item(
+                    {"payload": {"path": "missing.yaml"}}, "missing.yaml", "Missing"
+                )
+            )
+
+    async def test_context_config_file_listing_supports_file_workspace_root(self):
+        with TemporaryDirectory(dir=CONFIG_TEMP_DIR) as tmp:
+            root = Path(tmp)
+            config_file = root / "configuration.yaml"
+            config_file.write_text("homeassistant:\n", encoding="utf-8")
+            manager = CodexManager(
+                _FakeHass(root / "other"),
+                store=None,
+                workspace_path=str(config_file),
+                codex_command="codex",
+                bridge_url=None,
+                addon_write_scope=None,
+                validation_command=None,
+            )
+
+            result = await manager.async_context_config_files()
+
+        self.assertEqual([item["path"] for item in result["files"]], ["."])
+
     async def test_context_attachment_preparation_filters_duplicates_and_truncates_prompt_context(
         self,
     ):
@@ -4291,6 +5674,75 @@ class RestartWatchTests(unittest.TestCase):
         self.assertEqual(len(roots), 3)
 
 
+class RestartWatchAsyncTests(unittest.IsolatedAsyncioTestCase):
+    async def test_restart_approval_edge_cases_and_existing_approval_refire(self):
+        with TemporaryDirectory(dir=CONFIG_TEMP_DIR) as tmp:
+            root = Path(tmp)
+            manager = _make_manager(root)
+            manager.async_save = _async_noop
+            session = CodexSession(id="session-1")
+            manager.sessions[session.id] = session
+
+            with self.assertRaisesRegex(ValueError, "Unknown approval"):
+                await manager.async_respond_approval(session.id, "missing-restart", True)
+
+            self.assertEqual(
+                await manager._async_build_frontend_for_restart(),
+                {
+                    "ok": True,
+                    "skipped": True,
+                    "reason": "Frontend source package is not installed",
+                },
+            )
+            self.assertEqual(manager._tail_text("a" * 10, limit=5), "aaaaa")
+
+            await manager._maybe_request_restart_approval(session.id)
+            session.validation = ValidationResult(status="failed")
+            manager.restart_baselines[session.id] = {"before": (1, 1)}
+            await manager._maybe_request_restart_approval(session.id)
+            self.assertEqual(session.approvals, [])
+
+            session.validation = None
+            session.messages.append(
+                ChatMessage(
+                    role="user",
+                    content="Continue",
+                    metadata={"kind": "steer", "steer_status": "pending"},
+                )
+            )
+            await manager._maybe_request_restart_approval(session.id)
+            self.assertEqual(session.approvals, [])
+            session.messages.clear()
+
+            manager.restart_baselines[session.id] = manager._restart_watch_snapshot()
+            await manager._maybe_request_restart_approval(session.id)
+            self.assertEqual(session.approvals, [])
+
+            approval = PendingApproval(
+                id="restart-1",
+                session_id=session.id,
+                command="ha core restart",
+                reason="restart_required: changed file",
+            )
+            session.approvals.append(approval)
+            manager.restart_baselines[session.id] = {"before": (1, 1)}
+            manager._restart_watch_snapshot = lambda: {"after": (2, 2)}
+            await manager._maybe_request_restart_approval(session.id)
+            self.assertEqual(manager.hass.bus.events[-1][0], "ha_codex/approval_required")
+
+    async def test_restart_snapshot_tracks_missing_roots_and_stat_errors(self):
+        with TemporaryDirectory(dir=CONFIG_TEMP_DIR) as tmp:
+            root = Path(tmp)
+            manager = _make_manager(root)
+            missing_root = root / "missing"
+            snapshot = {}
+
+            manager._add_restart_path(snapshot, missing_root)
+            self.assertEqual(snapshot[str(missing_root)], (-1, -1))
+            restart_snapshot = manager._restart_watch_snapshot()
+            self.assertIn(str(root / "configuration.yaml"), restart_snapshot)
+
+
 class RunnerCommandTests(unittest.TestCase):
     def test_builds_new_codex_exec_command_with_workspace_and_additional_paths(self):
         options = RunnerOptions(
@@ -4347,6 +5799,65 @@ class RunnerCommandTests(unittest.TestCase):
         self.assertIn("-m", resume)
         self.assertIn('model_reasoning_effort="minimal"', resume)
         self.assertIn('model_verbosity="high"', resume)
+
+    def test_process_runner_streams_raw_empty_approval_and_error_events(self):
+        from custom_components.ha_codex import runner as runner_module
+
+        class FakeStdout:
+            def __init__(self, lines):
+                self._lines = list(lines)
+
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                if not self._lines:
+                    raise StopAsyncIteration
+                return self._lines.pop(0)
+
+        class FakeStderr:
+            async def read(self):
+                return b"runner failed"
+
+        class FakeProcess:
+            stdout = FakeStdout(
+                [
+                    b"\n",
+                    b"not json\n",
+                    b'{"type":"exec_approval_request","id":"approval-1","command":"cat file"}\n',
+                ]
+            )
+            stderr = FakeStderr()
+
+            async def wait(self):
+                return 2
+
+        original_create = runner_module.asyncio.create_subprocess_exec
+        try:
+            runner_module.asyncio.create_subprocess_exec = lambda *_args, **_kwargs: _async_value(
+                FakeProcess()
+            )
+            approvals = []
+
+            async def approval_handler(event):
+                approvals.append(event.command)
+                return True
+
+            events = asyncio.run(
+                _collect_async_iter(
+                    runner_module.CodexProcessRunner(
+                        RunnerOptions(codex_command="codex", workspace_path="/config")
+                    ).run("prompt", None, approval_handler=approval_handler)
+                )
+            )
+        finally:
+            runner_module.asyncio.create_subprocess_exec = original_create
+
+        self.assertEqual(events[0].kind, "raw")
+        self.assertEqual(events[1].kind, "approval_required")
+        self.assertEqual(approvals, ["cat file"])
+        self.assertEqual(events[2].kind, "error")
+        self.assertEqual(events[-1].kind, "run_finished")
 
 
 class RunnerApprovalTests(unittest.IsolatedAsyncioTestCase):
@@ -4772,12 +6283,36 @@ class _FakeGitOpsManager(GitOperationsMixin):
     def _head_path_exists(self, path: str) -> bool:
         return path in self.head_paths
 
+    def _display_workspace_change_path(self, path: str) -> str:
+        file_path = Path(path)
+        for root in (Path(self.hass.config.path()), Path(self.workspace_path)):
+            try:
+                return str(file_path.relative_to(root)).replace("\\", "/")
+            except ValueError:
+                continue
+        return path
+
     def _git_work_tree_from_command(self) -> str:
         return self.hass.config.path()
 
 
 def _cmd(ok=True, stdout="", stderr="", returncode=0):
     return {"ok": ok, "stdout": stdout, "stderr": stderr, "returncode": returncode}
+
+
+def _sequence_function(values):
+    items = list(values)
+
+    def next_value():
+        if len(items) > 1:
+            return items.pop(0)
+        return items[0]
+
+    return next_value
+
+
+async def _collect_async_iter(iterator):
+    return [item async for item in iterator]
 
 
 def _install_runtime_setup_stubs():

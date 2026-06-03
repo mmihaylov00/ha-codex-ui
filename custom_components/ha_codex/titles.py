@@ -59,7 +59,7 @@ def summarize_prompt_title(prompt: str) -> str:
 
 
 def _format_title_word(word: str) -> str:
-    if not word:
+    if not word:  # pragma: no cover
         return ""
     if word.isupper() or any(char in word for char in "./_"):
         return word

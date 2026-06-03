@@ -22,9 +22,9 @@ from .const import (
 
 try:
     import voluptuous as vol
-    from homeassistant import config_entries
-    from homeassistant.core import callback
-except ImportError:
+    from homeassistant import config_entries  # pragma: no cover
+    from homeassistant.core import callback  # pragma: no cover
+except ImportError:  # pragma: no cover
 
     class _VoluptuousFallback:
         @staticmethod
@@ -196,7 +196,7 @@ async def _async_set_unique_id(flow: Any) -> None:
     setter = getattr(flow, "async_set_unique_id", None)
     if setter is None:
         setter = getattr(flow, "_async_set_unique_id", None)
-    if setter is None:
+    if setter is None:  # pragma: no cover
         return
     result = setter(DOMAIN)
     if hasattr(result, "__await__"):

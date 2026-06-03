@@ -23,6 +23,8 @@ test("format helpers render relative times and absolute fallbacks", () => {
     assert.equal(formatRelativeTime(1_699_913_600), "yesterday");
     assert.equal(formatRelativeTime(1_700_086_400), "tomorrow");
     assert.equal(formatRelativeTime(1_700_259_200), "in 3 days");
+    assert.equal(formatRelativeTime(1_699_000_000), "2023-11-03");
+    assert.equal(formatRelativeTime(1_700_259_200, { pastOnly: true }), "just now");
     assert.equal(formatRunTime(1_699_999_880), "2 minutes ago");
     assert.equal(formatRelativeTime(""), "");
   } finally {
@@ -57,6 +59,9 @@ test("error and timestamp helpers normalize display values", () => {
   assert.equal(errorSummary({ name: "WS", code: 400, message: "Bad payload" }), "Bad payload (WS code 400)");
   assert.equal(errorSummary({ name: "WS", code: "unknown", data: { step: "pull" } }), 'WS code unknown: data: {"step":"pull"}');
   assert.equal(errorSummary({ name: "HTTP", code: 500 }), "HTTP code 500");
+  const circular = {};
+  circular.self = circular;
+  assert.match(errorSummary({ type: "Circular", self: circular }), /^\[object Object\]|Circular:/);
   assert.equal(errorSummary("unknown"), "unknown");
   assert.equal(formatTimestampTitle(0), "");
   assert.match(formatTimestampTitle(1_700_000_000), /2023|2024|11|14/);

@@ -171,6 +171,16 @@ test("edited assistant messages move below newer command messages", () => {
   assert.deepEqual(moveEditedMessageToEnd(messages, 0).map((message) => message.id), [2, 3, 1]);
 });
 
+test("message delta helpers ignore invalid indexes and append in place without later events", () => {
+  const messages = [{ id: 1, role: "assistant", content: "Start" }];
+
+  assert.equal(appendMessageContentDelta(messages, -1, " ignored"), messages);
+  assert.equal(appendMessageContentDelta(messages, 1, " ignored"), messages);
+  assert.equal(moveEditedMessageToEnd(messages, -1), messages);
+  assert.equal(moveEditedMessageToEnd(messages, 0), messages);
+  assert.deepEqual(appendMessageContentDelta(messages, 0, " done"), [{ id: 1, role: "assistant", content: "Start done" }]);
+});
+
 test("session helpers rank busy, empty, archived, and active chats", () => {
   const approval = { status: "pending", command: "cat configuration.yaml" };
   assert.equal(isSessionBusy(null), false);
@@ -200,6 +210,16 @@ test("new empty chats sort at the top of the current chat list", () => {
   ];
 
   assert.deepEqual(sortedSessions(sessions).map((session) => session.id), ["new-empty", "approval", "older"]);
+});
+
+test("session sorting falls back to titles when archived activity ties", () => {
+  const sessions = [
+    { id: "beta", title: "Beta", updated_at: 10, messages: [{ role: "assistant", created_at: 10 }] },
+    { id: "alpha", title: "Alpha", updated_at: 10, messages: [{ role: "assistant", created_at: 10 }] },
+  ];
+
+  assert.deepEqual(sortedSessions(sessions, true).map((session) => session.id), ["alpha", "beta"]);
+  assert.deepEqual(sortedSessions(sessions).map((session) => session.id), ["alpha", "beta"]);
 });
 
 test("session search filters ids by chat title without changing order", () => {

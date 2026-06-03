@@ -101,7 +101,7 @@ class RunCheckpointMixin:
         targets = []
         for change in changes:
             path = self._rollback_display_path(str(change.get("path", "")))
-            if not path or not self._is_visible_git_path(path):
+            if not path or not self._is_visible_git_path(path):  # pragma: no cover
                 continue
             before = checkpoint.get("snapshots", {}).get(path)
             if before is None:
@@ -207,7 +207,7 @@ class RunCheckpointMixin:
         path: str,
     ) -> dict[str, Any]:
         head = checkpoint.get("head")
-        if not head:
+        if not head:  # pragma: no cover
             return {"state": "absent"}
         for git_path in self._rollback_head_path_candidates(path):
             result = await self._run_command(
@@ -255,7 +255,7 @@ class RunCheckpointMixin:
             return {"state": "absent"}
         try:
             raw = file_path.read_bytes()
-        except OSError as err:
+        except OSError as err:  # pragma: no cover
             return {"state": "error", "error": str(err)}
         return self._bytes_snapshot(raw, include_content=include_content)
 

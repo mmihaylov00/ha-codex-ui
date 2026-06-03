@@ -292,7 +292,7 @@ custom_components/ha_codex/frontend/panel.js
 ```
 
 [releases]: https://github.com/mmihaylov00/ha-codex-ui/releases
-[releases-shield]: https://img.shields.io/github/release/mmihaylov00/ha-codex-ui.svg?style=popout
+[releases-shield]: https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fmmihaylov00%2Fha-codex-ui%2Freleases%2Flatest&query=%24.tag_name&label=release&logo=github&style=popout
 [downloads-total-shield]: https://img.shields.io/github/downloads/mmihaylov00/ha-codex-ui/total?style=popout
 [revolut-me]: https://revolut.me/mmihaylov00
 [revolut-me-shield]: https://img.shields.io/static/v1.svg?label=%20&message=Revolut&logo=revolut&style=popout

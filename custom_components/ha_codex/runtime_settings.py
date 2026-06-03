@@ -86,9 +86,9 @@ def normalize_settings(data: dict[str, Any] | None) -> dict[str, Any]:
     settings["context_budget_chars"] = _normalize_context_budget(
         data.get("context_budget_chars", DEFAULT_CONTEXT_BUDGET_CHARS)
     )
-    if settings["defaults"]["model_preset_id"] not in _preset_ids(presets):
-        settings["defaults"]["model_preset_id"] = DEFAULT_MODEL_PRESET_ID
-    elif settings["defaults"]["model_preset_id"] == LEGACY_DEFAULT_MODEL_PRESET_ID:
+    if settings["defaults"]["model_preset_id"] == LEGACY_DEFAULT_MODEL_PRESET_ID or settings[
+        "defaults"
+    ]["model_preset_id"] not in _preset_ids(presets):
         settings["defaults"]["model_preset_id"] = DEFAULT_MODEL_PRESET_ID
     return settings
 
@@ -106,11 +106,11 @@ def update_settings(current: dict[str, Any] | None, update: dict[str, Any]) -> d
         settings["context_budget_chars"] = _normalize_context_budget(update["context_budget_chars"])
 
     preset_ids = _preset_ids(settings["model_presets"])
-    if settings["defaults"]["model_preset_id"] not in preset_ids:
+    if settings["defaults"]["model_preset_id"] == LEGACY_DEFAULT_MODEL_PRESET_ID:
+        settings["defaults"]["model_preset_id"] = DEFAULT_MODEL_PRESET_ID
+    elif settings["defaults"]["model_preset_id"] not in preset_ids:
         if isinstance(update.get("defaults"), dict) and "model_preset_id" in update["defaults"]:
             raise ValueError("model_preset_id must reference a saved model preset")
-        settings["defaults"]["model_preset_id"] = DEFAULT_MODEL_PRESET_ID
-    elif settings["defaults"]["model_preset_id"] == LEGACY_DEFAULT_MODEL_PRESET_ID:
         settings["defaults"]["model_preset_id"] = DEFAULT_MODEL_PRESET_ID
     return settings
 

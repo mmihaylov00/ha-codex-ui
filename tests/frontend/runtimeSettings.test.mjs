@@ -5,9 +5,12 @@ import {
   contextBudgetState,
   defaultHaCodexSettings,
   deleteModelPreset,
+  estimateContextChars,
   modelPresetOptions,
   normalizeHaCodexSettings,
+  normalizeModelPresets,
   normalizeRunSettings,
+  presetIdFromLabel,
   runSettingsForSession,
   upsertModelPreset,
 } from "../../frontend/src/features/settings/runtimeSettingsUtils.ts";
@@ -54,6 +57,25 @@ test("legacy Codex default settings migrate to GPT-5.5", () => {
   assert.equal(migrated.model_presets.some((preset) => preset.id === "custom"), true);
 });
 
+test("settings normalization falls back from unknown presets and preserves custom presets", () => {
+  const normalized = normalizeHaCodexSettings({
+    defaults: { model_preset_id: "missing" },
+    model_presets: [
+      { id: "custom", label: "", model: "" },
+      { id: "custom", label: "Duplicate", model: "duplicate" },
+      null,
+      [],
+    ],
+    context_budget_chars: 250000,
+  });
+
+  assert.equal(normalized.defaults.model_preset_id, "gpt_5_5");
+  assert.equal(normalized.context_budget_chars, 200000);
+  assert.deepEqual(normalized.model_presets.at(-1), { id: "custom", label: "custom", model: null });
+  assert.equal(normalizeHaCodexSettings(undefined).context_budget_chars, 40000);
+  assert.equal(normalizeModelPresets("not-an-array").length, 6);
+});
+
 test("run settings normalization keeps manual overrides and rejects unknown enum values", () => {
   const normalized = normalizeRunSettings({
     mode: "manual",
@@ -76,4 +98,35 @@ test("context budget helper estimates usage and warning levels", () => {
   assert.equal(warning.level, "warning");
   assert.equal(danger.level, "danger");
   assert.match(danger.label, /\/ 1k/);
+  assert.equal(contextBudgetState([], Number.NaN).budget, 40000);
+  assert.equal(estimateContextChars([{ label: "Small" }]), JSON.stringify({ label: "Small" }).length);
+  assert.equal(presetIdFromLabel("  GPT 5.5 Codex! "), "gpt_5_5_codex");
+  assert.match(presetIdFromLabel("!!!"), /^model_\d+$/);
+});
+
+test("model preset helpers update, reject, and delete expected presets", () => {
+  const settings = defaultHaCodexSettings();
+  const withPreset = upsertModelPreset(settings, {
+    id: "",
+    label: "Local Model",
+    model: "",
+  });
+  const updated = upsertModelPreset(withPreset, {
+    id: "local_model",
+    label: "Local Model Updated",
+    model: "local-model",
+  });
+
+  assert.deepEqual(upsertModelPreset(updated, { id: "gpt_5_5", label: "Nope", model: "nope" }), updated);
+  assert.equal(updated.model_presets.at(-1).label, "Local Model Updated");
+  assert.deepEqual(deleteModelPreset(updated, "gpt_5_5"), normalizeHaCodexSettings(updated));
+  assert.equal(deleteModelPreset({
+    ...updated,
+    defaults: { ...updated.defaults, model_preset_id: "local_model" },
+  }, "local_model").defaults.model_preset_id, "gpt_5_5");
+  assert.equal(runSettingsForSession({ metadata: { run_settings: { model_preset_id: "missing" } } }, updated).model_preset_id, "gpt_5_5");
+  assert.equal(runSettingsForSession({ metadata: { run_settings: { model_preset_id: "codex_default" } } }, {
+    ...updated,
+    model_presets: [...updated.model_presets, { id: "codex_default", label: "Legacy", model: null }],
+  }).model_preset_id, "gpt_5_5");
 });

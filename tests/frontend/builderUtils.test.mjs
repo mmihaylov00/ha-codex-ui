@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   buildAutomationScriptRequest,
+  builderMetadataSummary,
   requiredBuilderMessages,
 } from "../../frontend/src/features/builder/builderUtils.ts";
 
@@ -66,4 +67,46 @@ test("blueprint builder prompt asks Codex to preserve behavior", () => {
   assert.match(request.runPrompt, /Convert the selected automation or script into a Home Assistant blueprint/);
   assert.match(request.runPrompt, /preserve the current behavior/i);
   assert.match(request.runPrompt, /Make the entity IDs configurable/);
+});
+
+test("builder helpers cover all template labels and metadata summaries", () => {
+  const script = buildAutomationScriptRequest("create_script", {
+    goal: "Turn off every downstairs light.",
+    actions: "Call light.turn_off for the downstairs area.",
+  }, [kitchenLight]);
+  const fix = buildAutomationScriptRequest("fix_automation", {
+    issue: "It turns on during the day.",
+  }, [automation]);
+  const explanation = buildAutomationScriptRequest("explain_simplify", {}, [automation]);
+
+  assert.equal(script.prompt, "Create script: Turn off every downstairs light.");
+  assert.match(script.runPrompt, /Create a Home Assistant script/);
+  assert.match(script.runPrompt, /Validate the Home Assistant YAML/);
+  assert.equal(fix.prompt, "Fix automation: It turns on during the day.");
+  assert.match(fix.runPrompt, /Fix the selected Home Assistant automation or script/);
+  assert.equal(explanation.prompt, "Explain or simplify: Porch Light");
+  assert.match(explanation.runPrompt, /Explain or simplify/);
+  assert.deepEqual(requiredBuilderMessages("create_script", {}, []), ["Goal is required."]);
+  assert.deepEqual(builderMetadataSummary(script.metadata), {
+    label: "Create script",
+    selections: [
+      { label: "Goal", value: "Turn off every downstairs light." },
+      { label: "Actions", value: "Call light.turn_off for the downstairs area." },
+    ],
+  });
+  assert.equal(builderMetadataSummary(null), null);
+  assert.equal(builderMetadataSummary({ builder: [] }), null);
+  assert.equal(builderMetadataSummary({ builder: { template_label: "", selections: [{ label: "Goal", value: "x" }] } }), null);
+  assert.deepEqual(builderMetadataSummary({
+    builder: {
+      template_label: "Custom",
+      selections: [
+        null,
+        [],
+        { label: "Goal", value: "Keep" },
+        { label: "", value: "Drop" },
+        { label: "Drop", value: "" },
+      ],
+    },
+  }), { label: "Custom", selections: [{ label: "Goal", value: "Keep" }] });
 });

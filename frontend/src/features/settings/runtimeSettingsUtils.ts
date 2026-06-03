@@ -72,9 +72,10 @@ export function normalizeHaCodexSettings(value: Partial<HaCodexSettings> | Recor
     model_presets: modelPresets,
     context_budget_chars: normalizeContextBudget((value as Partial<HaCodexSettings>).context_budget_chars),
   };
-  if (!settings.model_presets.some((preset) => preset.id === settings.defaults.model_preset_id)) {
-    settings.defaults.model_preset_id = DEFAULT_MODEL_PRESET_ID;
-  } else if (settings.defaults.model_preset_id === LEGACY_DEFAULT_MODEL_PRESET_ID) {
+  if (
+    settings.defaults.model_preset_id === LEGACY_DEFAULT_MODEL_PRESET_ID
+    || !settings.model_presets.some((preset) => preset.id === settings.defaults.model_preset_id)
+  ) {
     settings.defaults.model_preset_id = DEFAULT_MODEL_PRESET_ID;
   }
   return settings;
@@ -138,9 +139,10 @@ export function runSettingsForSession(session: Pick<CodexSession, "metadata"> | 
     override && typeof override === "object" ? override as Record<string, unknown> : undefined,
     normalized.defaults,
   );
-  if (!normalized.model_presets.some((preset) => preset.id === runSettings.model_preset_id)) {
-    runSettings.model_preset_id = DEFAULT_MODEL_PRESET_ID;
-  } else if (runSettings.model_preset_id === LEGACY_DEFAULT_MODEL_PRESET_ID) {
+  if (
+    runSettings.model_preset_id === LEGACY_DEFAULT_MODEL_PRESET_ID
+    || !normalized.model_presets.some((preset) => preset.id === runSettings.model_preset_id)
+  ) {
     runSettings.model_preset_id = DEFAULT_MODEL_PRESET_ID;
   }
   return runSettings;

@@ -10409,7 +10409,7 @@ function On(e) {
 		model_presets: n,
 		context_budget_chars: In(e.context_budget_chars)
 	};
-	return r.model_presets.some((e) => e.id === r.defaults.model_preset_id) ? r.defaults.model_preset_id === "codex_default" && (r.defaults.model_preset_id = bn) : r.defaults.model_preset_id = bn, r;
+	return (r.defaults.model_preset_id === "codex_default" || !r.model_presets.some((e) => e.id === r.defaults.model_preset_id)) && (r.defaults.model_preset_id = bn), r;
 }
 function kn(e) {
 	let t = Sn.map((e) => ({ ...e })), n = new Set([...Sn.map((e) => e.id), xn]);
@@ -10453,7 +10453,7 @@ function jn(e, t) {
 }
 function Mn(e, t) {
 	let n = On(t), r = e?.metadata?.run_settings, i = Dn(r && typeof r == "object" ? r : void 0, n.defaults);
-	return n.model_presets.some((e) => e.id === i.model_preset_id) ? i.model_preset_id === "codex_default" && (i.model_preset_id = bn) : i.model_preset_id = bn, i;
+	return (i.model_preset_id === "codex_default" || !n.model_presets.some((e) => e.id === i.model_preset_id)) && (i.model_preset_id = bn), i;
 }
 function Nn(e, t = 4e4) {
 	let n = Math.max(1e3, Number.isFinite(Number(t)) ? Number(t) : 4e4), r = Pn(e), i = r / n;

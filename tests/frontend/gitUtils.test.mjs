@@ -65,6 +65,12 @@ test("git review actions are disabled when every file is deselected", () => {
   assert.equal(gitReviewActionDisabled(files, defaultGitSelection(files), true), true);
 });
 
+test("git selection can toggle a deselected file back on", () => {
+  const file = { path: "configuration.yaml", status: "modified" };
+
+  assert.deepEqual(toggleGitSelection(file, {}), { "\nconfiguration.yaml": true });
+});
+
 test("git setup is ready only after backend setup is complete", () => {
   assert.equal(isGitSetupReady(null), false);
   assert.equal(isGitSetupReady({ setup_complete: false, repository: true, remote_configured: true }), false);

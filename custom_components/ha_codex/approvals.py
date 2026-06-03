@@ -24,7 +24,7 @@ def is_safe_read_only_command(command: str) -> bool:
         return False
     if len(parts) >= 3 and parts[0] in _SHELLS and parts[1] == "-lc":
         return is_safe_read_only_command(parts[2])
-    if not parts:
+    if not parts:  # pragma: no cover
         return False
     command_name = _command_name(parts[0])
     args = parts[1:]

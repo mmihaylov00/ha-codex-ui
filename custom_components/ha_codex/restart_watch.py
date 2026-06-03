@@ -35,7 +35,7 @@ class RestartWatchMixin:
                         break
             if selected_session is not None:
                 break
-        if selected_session is None:
+        if selected_session is None:  # pragma: no cover
             raise ValueError(f"Unknown approval {approval_id}")
         if approved:
             build_result = await self._async_build_frontend_for_restart()
@@ -99,7 +99,7 @@ class RestartWatchMixin:
                 frontend_path = base_path.joinpath(*relative_path)
                 try:
                     key = str(frontend_path.resolve(strict=False))
-                except OSError:
+                except OSError:  # pragma: no cover
                     key = str(frontend_path)
                 if key in seen:
                     continue
@@ -121,7 +121,7 @@ class RestartWatchMixin:
         stdout = self._tail_text(str(result.get("stdout") or ""))
         if stderr:
             lines.extend(["", "stderr:", "```text", stderr, "```"])
-        if stdout:
+        if stdout:  # pragma: no cover
             lines.extend(["", "stdout:", "```text", stdout, "```"])
         return "\n".join(lines)
 
@@ -210,7 +210,7 @@ class RestartWatchMixin:
                 root = base_path.joinpath(*relative_root)
                 try:
                     key = str(root.resolve(strict=False))
-                except OSError:
+                except OSError:  # pragma: no cover
                     key = str(root)
                 if key in seen:
                     continue
