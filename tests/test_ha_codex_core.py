@@ -57,6 +57,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 CONFIG_TEMP_DIR = REPO_ROOT / "test_workspaces"
 CONFIG_TEMP_DIR.mkdir(exist_ok=True)
 BRIDGE_PATH = REPO_ROOT / "custom_components" / "ha_codex" / "bridge" / "ha_codex_bridge.py"
+UNINSTALL_SCRIPT = REPO_ROOT / "scripts" / "uninstall-ha-codex-ui.sh"
 
 
 def load_bridge_module():
@@ -65,6 +66,103 @@ def load_bridge_module():
     assert spec and spec.loader
     spec.loader.exec_module(module)
     return module
+
+
+class UninstallScriptTests(unittest.TestCase):
+    def test_uninstall_script_dry_run_lists_default_codex_cleanup_targets(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp) / "config"
+            home = Path(tmp) / "home"
+            self._create_uninstall_targets(root, home)
+
+            result = subprocess.run(
+                [
+                    "bash",
+                    str(UNINSTALL_SCRIPT),
+                    "--config-dir",
+                    str(root),
+                    "--home-dir",
+                    str(home),
+                    "--dry-run",
+                ],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+
+        self.assertIn(f"Would remove: {root / 'custom_components' / 'ha_codex'}", result.stdout)
+        self.assertIn(f"Would remove: {root / 'codex_home'}", result.stdout)
+        self.assertIn(f"Would remove: {root / '.codex'}", result.stdout)
+        self.assertIn(f"Would remove: {root / '.cache' / 'codex'}", result.stdout)
+        self.assertIn(f"Would remove: {root / 'bin' / 'codex'}", result.stdout)
+        self.assertIn(f"Would remove: {root / '.ssh' / 'ha_codex_ed25519'}", result.stdout)
+        self.assertIn(f"Would remove: {home / '.codex'}", result.stdout)
+        self.assertIn(f"Would remove: {home / '.cache' / 'openai-codex'}", result.stdout)
+
+    def test_uninstall_script_removes_default_codex_cleanup_targets(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp) / "config"
+            home = Path(tmp) / "home"
+            targets = self._create_uninstall_targets(root, home)
+            keep = root / "configuration.yaml"
+            keep.parent.mkdir(parents=True, exist_ok=True)
+            keep.write_text("homeassistant:\n", encoding="utf-8")
+
+            subprocess.run(
+                [
+                    "bash",
+                    str(UNINSTALL_SCRIPT),
+                    "--config-dir",
+                    str(root),
+                    "--home-dir",
+                    str(home),
+                    "--yes",
+                ],
+                text=True,
+                capture_output=True,
+                check=True,
+            )
+
+            self.assertTrue(keep.exists())
+            for target in targets:
+                self.assertFalse(target.exists(), f"{target} should be removed")
+
+    def _create_uninstall_targets(self, root: Path, home: Path) -> list[Path]:
+        directory_targets = [
+            root / "custom_components" / "ha_codex",
+            root / "codex_home",
+            root / "www" / "ha_codex",
+            root / ".codex",
+            root / ".cache" / "codex",
+            root / ".cache" / "openai-codex",
+            root / ".cache" / "openai_codex",
+            root / ".config" / "codex",
+            root / ".config" / "openai-codex",
+            root / ".local" / "share" / "codex",
+            root / ".local" / "state" / "openai-codex",
+            home / ".codex",
+            home / ".cache" / "codex",
+            home / ".cache" / "openai-codex",
+            home / ".config" / "openai-codex",
+            home / ".local" / "state" / "codex",
+        ]
+        for directory in directory_targets:
+            directory.mkdir(parents=True, exist_ok=True)
+            (directory / "sentinel").write_text("remove me\n", encoding="utf-8")
+
+        file_targets = [
+            root / "ha_codex_bridge.log",
+            root / ".storage" / "ha_codex.sessions",
+            root / "bin" / "start_ha_codex_bridge.sh",
+            root / "bin" / "restart_ha_codex_bridge.sh",
+            root / "bin" / "codex",
+            root / ".ssh" / "ha_codex_ed25519",
+            root / ".ssh" / "ha_codex_ed25519.pub",
+        ]
+        for path in file_targets:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("remove me\n", encoding="utf-8")
+        return directory_targets + file_targets
 
 
 class CapabilityDiscoveryTests(unittest.TestCase):
@@ -147,6 +245,7 @@ class ConfigEntryTests(unittest.TestCase):
         self.assertEqual(defaults["codex_command"], "")
         self.assertEqual(defaults["bridge_url"], "http://127.0.0.1:8765")
         self.assertTrue(defaults["require_admin"])
+        self.assertFalse(defaults["openai_training_opt_out_confirmed"])
         self.assertEqual(defaults["addon_write_scope"], "all_visible")
         self.assertEqual(defaults["validation_command"], "auto")
 
@@ -157,12 +256,14 @@ class ConfigEntryTests(unittest.TestCase):
                 "codex_command": "/config/bin/codex",
                 "bridge_url": "",
                 "require_admin": True,
+                "openai_training_opt_out_confirmed": "true",
                 "addon_write_scope": "",
                 "validation_command": "",
             }
         )
 
         self.assertEqual(data["bridge_url"], None)
+        self.assertTrue(data["openai_training_opt_out_confirmed"])
         self.assertEqual(data["addon_write_scope"], None)
         self.assertEqual(data["validation_command"], None)
 
@@ -173,6 +274,7 @@ class ConfigEntryTests(unittest.TestCase):
         self.assertEqual(merged["workspace_path"], "/config")
         self.assertEqual(merged["codex_command"], "codex")
         self.assertFalse(merged["require_admin"])
+        self.assertFalse(merged["openai_training_opt_out_confirmed"])
 
     def test_config_schema_formats_nullable_and_list_values_for_forms(self):
         schema = config_schema(
@@ -299,6 +401,35 @@ class IntegrationSetupTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(calls["removed_panels"], ["ha-codex"])
 
                 self.assertTrue(await integration.async_reload_entry(hass, entry))
+            finally:
+                manager_module.CodexManager = original_manager
+
+    async def test_setup_entry_starts_bridge_when_training_opt_out_is_not_confirmed(self):
+        import custom_components.ha_codex as integration
+        import custom_components.ha_codex.manager as manager_module
+
+        with TemporaryDirectory(dir=CONFIG_TEMP_DIR) as tmp:
+            root = Path(tmp)
+            panel_dir = root / "www" / "ha_codex"
+            panel_dir.mkdir(parents=True)
+            (panel_dir / "panel.js").write_text("console.log('panel')\n", encoding="utf-8")
+            hass = _FakeSetupHass(root)
+            _install_runtime_setup_stubs()
+            original_manager = manager_module.CodexManager
+            try:
+                manager_module.CodexManager = _FakeRuntimeManager
+                entry = _FakeConfigEntry(
+                    data={
+                        "bridge_url": "http://127.0.0.1:8765",
+                        "openai_training_opt_out_confirmed": False,
+                    },
+                    options={},
+                )
+                self.assertTrue(await integration.async_setup_entry(hass, entry))
+
+                runtime_manager = hass.data["ha_codex"]
+                self.assertFalse(runtime_manager.openai_training_opt_out_confirmed)
+                self.assertTrue(runtime_manager.started_bridge)
             finally:
                 manager_module.CodexManager = original_manager
 
@@ -1416,6 +1547,46 @@ class SessionTitleTests(unittest.TestCase):
 
 
 class SessionRunTests(unittest.IsolatedAsyncioTestCase):
+    async def test_training_opt_out_not_confirmed_blocks_task_content_only(self):
+        manager = CodexManager(
+            _FakeHass("/tmp"),
+            store=None,
+            workspace_path="/homeassistant",
+            codex_command="codex",
+            bridge_url=None,
+            addon_write_scope=None,
+            validation_command=None,
+            openai_training_opt_out_confirmed=False,
+        )
+        manager.async_save = _async_noop
+        session = CodexSession(id="session-1")
+        manager.sessions[session.id] = session
+
+        runtime = await manager.async_probe()
+        status = await manager.async_status()
+
+        self.assertFalse(runtime["openai_training_opt_out_confirmed"])
+        self.assertFalse(status["runtime"]["openai_training_opt_out_confirmed"])
+        self.assertEqual((await manager.async_account_status())["error"], "Bridge mode is not configured")
+        self.assertEqual(
+            (await manager.async_account_device_login_start())["error"],
+            "Bridge mode is not configured",
+        )
+        self.assertEqual((await manager.async_start_bridge())["error"], "Bridge mode is not configured")
+        with self.assertRaisesRegex(ValueError, "training opt-out has not been confirmed"):
+            await manager.async_send(session.id, "Inspect configuration.yaml")
+        self.assertEqual(session.messages, [])
+
+        session.metadata["pending_plan"] = {
+            "id": "plan-1",
+            "prompt": "Update configuration.yaml",
+            "status": "pending",
+        }
+        with self.assertRaisesRegex(ValueError, "training opt-out has not been confirmed"):
+            await manager.async_respond_run_plan(session.id, "plan-1", "approve")
+        canceled = await manager.async_respond_run_plan(session.id, "plan-1", "cancel")
+        self.assertEqual(canceled.status, "idle")
+
     async def test_send_stores_raw_prompt_and_runs_with_backend_composed_context(self):
         with TemporaryDirectory(dir=CONFIG_TEMP_DIR) as tmp:
             root = Path(tmp)
@@ -4903,8 +5074,10 @@ class ManagerUtilityTests(unittest.IsolatedAsyncioTestCase):
             bridge_url=None,
             addon_write_scope=None,
             validation_command=None,
+            openai_training_opt_out_confirmed=False,
         )
 
+        self.assertFalse(manager.openai_training_opt_out_confirmed)
         self.assertFalse((await manager._async_usage_status())["ok"])
         self.assertFalse((await manager._async_bridge_json("GET", "/status"))["ok"])
         self.assertFalse((await manager._async_bridge_health_status())["ok"])
@@ -6232,12 +6405,14 @@ class _FakeRuntimeManager:
         bridge_url,
         addon_write_scope,
         validation_command,
+        openai_training_opt_out_confirmed=False,
     ):
         self.hass = hass
         self.store = store
         self.workspace_path = workspace_path
         self.codex_command = codex_command
         self.bridge_url = bridge_url
+        self.openai_training_opt_out_confirmed = openai_training_opt_out_confirmed
         self.addon_write_scope = addon_write_scope
         self.validation_command = validation_command
         self.loaded = False

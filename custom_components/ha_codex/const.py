@@ -6,6 +6,7 @@ CONF_WORKSPACE_PATH = "workspace_path"
 CONF_CODEX_COMMAND = "codex_command"
 CONF_BRIDGE_URL = "bridge_url"
 CONF_REQUIRE_ADMIN = "require_admin"
+CONF_OPENAI_TRAINING_OPT_OUT_CONFIRMED = "openai_training_opt_out_confirmed"
 CONF_ADDON_WRITE_SCOPE = "addon_write_scope"
 CONF_VALIDATION_COMMAND = "validation_command"
 
@@ -13,6 +14,7 @@ DEFAULT_WORKSPACE_PATH = "/config"
 DEFAULT_CODEX_COMMAND = ""
 DEFAULT_BRIDGE_URL = "http://127.0.0.1:8765"
 DEFAULT_REQUIRE_ADMIN = True
+DEFAULT_OPENAI_TRAINING_OPT_OUT_CONFIRMED = False
 DEFAULT_ADDON_WRITE_SCOPE = "all_visible"
 DEFAULT_VALIDATION_COMMAND = "auto"
 

@@ -62,6 +62,7 @@ function ActiveChat({ activeId, ...props }: ChatPanelProps & { activeId: string 
   const setQuestionDraft = useChatStore((state) => state.setQuestionDraft);
   const queues = useChatStore((state) => state.queuesByChatId[activeId] || EMPTY_QUEUES);
   const settings = useUiStore((state) => state.settings);
+  const status = useUiStore((state) => state.status);
   const renamingId = useUiStore((state) => state.renamingId);
   const renameTitle = useUiStore((state) => state.renameTitle);
   const setRenaming = useUiStore((state) => state.setRenaming);
@@ -82,6 +83,7 @@ function ActiveChat({ activeId, ...props }: ChatPanelProps & { activeId: string 
   const running = isSessionBusy(session);
   const runPlan = pendingRunPlan(session);
   const runSettings = useMemo(() => runSettingsForSession(session, settings), [session, settings]);
+  const trainingOptOutConfirmed = ((status.runtime || {}) as Record<string, unknown>).openai_training_opt_out_confirmed === true;
   const budget = useMemo(() => contextBudgetState(contextItems, settings.context_budget_chars), [contextItems, settings.context_budget_chars]);
   const planGenerating = isRunPlanGenerating(session);
   const canRetryMessages = session?.status === "error" && !archived;
@@ -272,6 +274,7 @@ function ActiveChat({ activeId, ...props }: ChatPanelProps & { activeId: string 
           <form className="composer" onSubmit={(event) => {
             event.preventDefault();
             if (runPlan || planGenerating) return;
+            if (!trainingOptOutConfirmed) return;
             const prompt = draft.trim();
             if (!prompt) return;
             clearDraft(session.id);
@@ -310,7 +313,9 @@ function ActiveChat({ activeId, ...props }: ChatPanelProps & { activeId: string 
                   <button className="builder-button" type="button" onClick={() => setBuilderOpen(true)} title="Automation builder" aria-label="Automation builder">
                     <Icon icon="mdi:robot-industrial-outline" />
                   </button>
-                  <button className="send-button" type="submit" title="Send" aria-label="Send"><Icon icon="mdi:send" /></button>
+                  <button className="send-button" type="submit" title={trainingOptOutConfirmed ? "Send" : "OpenAI training opt-out not confirmed"} aria-label={trainingOptOutConfirmed ? "Send" : "OpenAI training opt-out not confirmed"} disabled={!trainingOptOutConfirmed}>
+                    <Icon icon={trainingOptOutConfirmed ? "mdi:send" : "mdi:lock-outline"} />
+                  </button>
                 </div>
               </>
             ) : null}

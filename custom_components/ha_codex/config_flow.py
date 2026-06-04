@@ -8,12 +8,14 @@ from .const import (
     CONF_ADDON_WRITE_SCOPE,
     CONF_BRIDGE_URL,
     CONF_CODEX_COMMAND,
+    CONF_OPENAI_TRAINING_OPT_OUT_CONFIRMED,
     CONF_REQUIRE_ADMIN,
     CONF_VALIDATION_COMMAND,
     CONF_WORKSPACE_PATH,
     DEFAULT_ADDON_WRITE_SCOPE,
     DEFAULT_BRIDGE_URL,
     DEFAULT_CODEX_COMMAND,
+    DEFAULT_OPENAI_TRAINING_OPT_OUT_CONFIRMED,
     DEFAULT_REQUIRE_ADMIN,
     DEFAULT_VALIDATION_COMMAND,
     DEFAULT_WORKSPACE_PATH,
@@ -59,6 +61,7 @@ _CONFIG_KEYS = (
     CONF_CODEX_COMMAND,
     CONF_BRIDGE_URL,
     CONF_REQUIRE_ADMIN,
+    CONF_OPENAI_TRAINING_OPT_OUT_CONFIRMED,
     CONF_ADDON_WRITE_SCOPE,
     CONF_VALIDATION_COMMAND,
 )
@@ -76,6 +79,7 @@ def config_defaults() -> dict[str, Any]:
         CONF_CODEX_COMMAND: DEFAULT_CODEX_COMMAND,
         CONF_BRIDGE_URL: DEFAULT_BRIDGE_URL,
         CONF_REQUIRE_ADMIN: DEFAULT_REQUIRE_ADMIN,
+        CONF_OPENAI_TRAINING_OPT_OUT_CONFIRMED: DEFAULT_OPENAI_TRAINING_OPT_OUT_CONFIRMED,
         CONF_ADDON_WRITE_SCOPE: DEFAULT_ADDON_WRITE_SCOPE,
         CONF_VALIDATION_COMMAND: DEFAULT_VALIDATION_COMMAND,
     }
@@ -87,7 +91,7 @@ def normalize_config_input(user_input: dict[str, Any] | None) -> dict[str, Any]:
     for key, value in (user_input or {}).items():
         if key not in _CONFIG_KEYS:
             continue
-        if key == CONF_REQUIRE_ADMIN:
+        if key in {CONF_REQUIRE_ADMIN, CONF_OPENAI_TRAINING_OPT_OUT_CONFIRMED}:
             values[key] = _normalize_bool(value)
         elif key in _NULLABLE_KEYS:
             values[key] = _normalize_optional_value(value)
@@ -113,6 +117,10 @@ def config_schema(config: dict[str, Any] | None = None) -> Any:
             vol.Optional(CONF_CODEX_COMMAND, default=values[CONF_CODEX_COMMAND]): str,
             vol.Optional(CONF_BRIDGE_URL, default=values[CONF_BRIDGE_URL]): str,
             vol.Optional(CONF_REQUIRE_ADMIN, default=values[CONF_REQUIRE_ADMIN]): bool,
+            vol.Optional(
+                CONF_OPENAI_TRAINING_OPT_OUT_CONFIRMED,
+                default=values[CONF_OPENAI_TRAINING_OPT_OUT_CONFIRMED],
+            ): bool,
             vol.Optional(CONF_ADDON_WRITE_SCOPE, default=values[CONF_ADDON_WRITE_SCOPE]): str,
             vol.Optional(CONF_VALIDATION_COMMAND, default=values[CONF_VALIDATION_COMMAND]): str,
         }

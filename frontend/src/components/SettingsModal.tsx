@@ -42,7 +42,8 @@ export function SettingsModal({ onClose, onTab, onSettingsSave, onBridgeRestart,
   const settings = useUiStore((state) => state.settings);
   const saving = useUiStore((state) => state.settingsSaving);
   const status = useUiStore((state) => state.status);
-  const bridgeAvailable = (status.runtime as { bridge_available?: boolean } | undefined)?.bridge_available === true;
+  const runtime = (status.runtime || {}) as Record<string, unknown>;
+  const bridgeAvailable = runtime.bridge_available === true;
   const bridgeActionRunning = useUiStore((state) => state.bridgeActionRunning);
   const coreActionRunning = useUiStore((state) => state.coreActionRunning);
   const bridgeActionLabel = bridgeAvailable ? "Restart" : "Start";
@@ -656,6 +657,7 @@ function RuntimeCards() {
   const cards = [
     { label: "Runner", value: runtime.runner_type || "unknown", detail: runtime.codex_exec_available === false ? "Codex exec unavailable" : "Codex exec ready", tone: runtime.codex_exec_available === false ? "error" : "" },
     { label: "Bridge", value: runtime.bridge_available === false ? "Unavailable" : runtime.bridge_available ? "Available" : "Unknown", detail: runtime.bridge_url || "No bridge URL", tone: runtime.bridge_available === false ? "error" : runtime.bridge_available ? "success" : "" },
+    { label: "Training", value: runtime.openai_training_opt_out_confirmed ? "Opt-out confirmed" : "Not confirmed", detail: runtime.openai_training_opt_out_confirmed ? "Task sends allowed" : "Task sends blocked", tone: runtime.openai_training_opt_out_confirmed ? "success" : "warning" },
     { label: "Uptime", value: formatDuration(runtime.bridge_uptime_seconds) || "Not reported", detail: runtime.bridge_started_at ? `Started ${formatRunTime(runtime.bridge_started_at)}` : ((runtime.bridge_health as { error?: string } | undefined)?.error || "No bridge health data"), tone: (runtime.bridge_health as { error?: string } | undefined)?.error ? "warning" : "" },
     { label: "Codex", value: runtime.codex_version || "No version", detail: runtime.codex_path || runtime.codex_command || "No command", tone: runtime.codex_path ? "" : "warning" },
     { label: "Workspace", value: runtime.workspace_exists === false ? "Missing" : runtime.workspace_exists ? "Ready" : "Unknown", detail: runtime.workspace_path || "No workspace path", tone: runtime.workspace_exists === false ? "error" : "" },

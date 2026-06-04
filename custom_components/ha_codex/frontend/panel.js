@@ -16408,35 +16408,35 @@ function pl(e) {
 	});
 }
 function ml({ activeId: e, ...t }) {
-	let n = j((t) => t.chatsById[e]), r = j((t) => t.messagesByChatId[e] || ul), i = j((t) => t.drafts[e] || ""), a = j((e) => e.setDraft), o = j((e) => e.clearDraft), s = j((t) => t.contextByChatId[e] || fl), c = j((e) => e.addContextItem), l = j((e) => e.removeContextItem), u = j((e) => e.clearContext), d = j((t) => t.questionDrafts[e] || ""), f = j((e) => e.setQuestionDraft), p = j((t) => t.queuesByChatId[e] || dl), m = M((e) => e.settings), h = M((e) => e.renamingId), g = M((e) => e.renameTitle), _ = M((e) => e.setRenaming), v = (0, k.useRef)(null), y = (0, k.useRef)(null), b = (0, k.useRef)(!0), x = (0, k.useRef)({
+	let n = j((t) => t.chatsById[e]), r = j((t) => t.messagesByChatId[e] || ul), i = j((t) => t.drafts[e] || ""), a = j((e) => e.setDraft), o = j((e) => e.clearDraft), s = j((t) => t.contextByChatId[e] || fl), c = j((e) => e.addContextItem), l = j((e) => e.removeContextItem), u = j((e) => e.clearContext), d = j((t) => t.questionDrafts[e] || ""), f = j((e) => e.setQuestionDraft), p = j((t) => t.queuesByChatId[e] || dl), m = M((e) => e.settings), h = M((e) => e.status), g = M((e) => e.renamingId), _ = M((e) => e.renameTitle), v = M((e) => e.setRenaming), y = (0, k.useRef)(null), b = (0, k.useRef)(null), x = (0, k.useRef)(!0), S = (0, k.useRef)({
 		activeId: e,
 		messageCount: 0,
 		thinkingVisible: !1
-	}), S = (0, k.useRef)(null), C = (0, k.useRef)(null), [w, T] = (0, k.useState)(!1), [ee, te] = (0, k.useState)(!1), [ne, re] = (0, k.useState)(!0), [ie, ae] = (0, k.useState)(e), [oe, se] = (0, k.useState)(0), ce = (0, k.useMemo)(() => gt(r), [r]), le = (0, k.useMemo)(() => n ? ft(n, r) : null, [n, r]), E = !!n?.archived, D = ht(n), ue = Zn(n), de = (0, k.useMemo)(() => Mn(n, m), [n, m]), fe = (0, k.useMemo)(() => Nn(s, m.context_budget_chars), [s, m.context_budget_chars]), pe = Qn(n), me = n?.status === "error" && !E, O = D && !le, he = (0, k.useMemo)(() => ({ Footer: () => O ? /* @__PURE__ */ (0, A.jsx)(wl, {}) : null }), [O]), ge = (0, k.useCallback)(() => {
-		b.current = !0, re(!0), se((e) => e + 1);
-	}, []), _e = (0, k.useCallback)((e) => {
-		e && (b.current = !0), re(e);
-	}, []), ve = (0, k.useCallback)((e) => {
-		e.deltaY < 0 && (b.current = !1);
+	}), C = (0, k.useRef)(null), w = (0, k.useRef)(null), [T, ee] = (0, k.useState)(!1), [te, ne] = (0, k.useState)(!1), [re, ie] = (0, k.useState)(!0), [ae, oe] = (0, k.useState)(e), [se, ce] = (0, k.useState)(0), le = (0, k.useMemo)(() => gt(r), [r]), E = (0, k.useMemo)(() => n ? ft(n, r) : null, [n, r]), D = !!n?.archived, ue = ht(n), de = Zn(n), fe = (0, k.useMemo)(() => Mn(n, m), [n, m]), pe = (h.runtime || {}).openai_training_opt_out_confirmed === !0, me = (0, k.useMemo)(() => Nn(s, m.context_budget_chars), [s, m.context_budget_chars]), O = Qn(n), he = n?.status === "error" && !D, ge = ue && !E, _e = (0, k.useMemo)(() => ({ Footer: () => ge ? /* @__PURE__ */ (0, A.jsx)(wl, {}) : null }), [ge]), ve = (0, k.useCallback)(() => {
+		x.current = !0, ie(!0), ce((e) => e + 1);
 	}, []), ye = (0, k.useCallback)((e) => {
-		S.current = e.touches[0]?.clientY ?? null;
+		e && (x.current = !0), ie(e);
 	}, []), be = (0, k.useCallback)((e) => {
-		let t = e.touches[0]?.clientY ?? null;
-		S.current !== null && t !== null && t > S.current && (b.current = !1), S.current = t;
-	}, []), xe = (0, k.useCallback)(() => {
-		S.current = null;
+		e.deltaY < 0 && (x.current = !1);
+	}, []), xe = (0, k.useCallback)((e) => {
+		C.current = e.touches[0]?.clientY ?? null;
 	}, []), Se = (0, k.useCallback)((e) => {
-		y.current = e;
-	}, []), Ce = (0, k.useCallback)((e) => {
-		ce.length && v.current?.scrollToIndex({
-			index: ce.length - 1,
+		let t = e.touches[0]?.clientY ?? null;
+		C.current !== null && t !== null && t > C.current && (x.current = !1), C.current = t;
+	}, []), Ce = (0, k.useCallback)(() => {
+		C.current = null;
+	}, []), we = (0, k.useCallback)((e) => {
+		b.current = e;
+	}, []), Te = (0, k.useCallback)((e) => {
+		le.length && y.current?.scrollToIndex({
+			index: le.length - 1,
 			align: "end",
 			behavior: e
-		}), v.current?.scrollTo({
+		}), y.current?.scrollTo({
 			top: 2 ** 53 - 1,
 			behavior: e
 		});
-		let t = y.current;
+		let t = b.current;
 		t && (t instanceof HTMLElement ? t.scrollTo({
 			top: t.scrollHeight,
 			behavior: e
@@ -16444,37 +16444,37 @@ function ml({ activeId: e, ...t }) {
 			top: t.document.documentElement.scrollHeight,
 			behavior: e
 		}));
-	}, [ce.length]), we = (0, k.useCallback)(() => {
-		ce.length && (b.current = !0, re(!0), Ce("smooth"));
-	}, [ce.length, Ce]);
+	}, [le.length]), Ee = (0, k.useCallback)(() => {
+		le.length && (x.current = !0, ie(!0), Te("smooth"));
+	}, [le.length, Te]);
 	if ((0, k.useEffect)(() => {
-		b.current = !0, re(!0), ae(e);
+		x.current = !0, ie(!0), oe(e);
 	}, [e]), (0, k.useEffect)(() => {
-		let t = b.current || ie === e, n = x.current, r = n.activeId !== e, i = !r && ce.length > n.messageCount, a = !r && O && !n.thinkingVisible;
-		if (x.current = {
+		let t = x.current || ae === e, n = S.current, r = n.activeId !== e, i = !r && le.length > n.messageCount, a = !r && ge && !n.thinkingVisible;
+		if (S.current = {
 			activeId: e,
-			messageCount: ce.length,
-			thinkingVisible: O
-		}, !t && !oe || !ce.length && !O) return;
-		let o = ie === e && !oe ? "auto" : oe || i || a ? "smooth" : "auto", s = 0, c = 0, l = requestAnimationFrame(() => {
-			Ce(o), s = requestAnimationFrame(() => Ce(o)), c = window.setTimeout(() => Ce(o), 120), ie === e && ae(null), oe && se(0);
+			messageCount: le.length,
+			thinkingVisible: ge
+		}, !t && !se || !le.length && !ge) return;
+		let o = ae === e && !se ? "auto" : se || i || a ? "smooth" : "auto", s = 0, c = 0, l = requestAnimationFrame(() => {
+			Te(o), s = requestAnimationFrame(() => Te(o)), c = window.setTimeout(() => Te(o), 120), ae === e && oe(null), se && ce(0);
 		});
 		return () => {
 			cancelAnimationFrame(l), cancelAnimationFrame(s), window.clearTimeout(c);
 		};
 	}, [
 		e,
-		ie,
-		ce,
-		Ce,
-		oe,
-		O
+		ae,
+		le,
+		Te,
+		se,
+		ge
 	]), (0, k.useEffect)(() => {
-		let t = b.current || ie === e;
-		if (!O || !t) return;
+		let t = x.current || ae === e;
+		if (!ge || !t) return;
 		let n = 0, r = requestAnimationFrame(() => {
-			Ce("smooth"), n = requestAnimationFrame(() => {
-				Ce("smooth");
+			Te("smooth"), n = requestAnimationFrame(() => {
+				Te("smooth");
 			});
 		});
 		return () => {
@@ -16482,16 +16482,16 @@ function ml({ activeId: e, ...t }) {
 		};
 	}, [
 		e,
-		ie,
-		Ce,
-		O
+		ae,
+		Te,
+		ge
 	]), (0, k.useEffect)(() => {
-		let e = C.current;
+		let e = w.current;
 		e && (e.style.height = "52px", e.style.height = `${Math.min(e.scrollHeight, 180)}px`);
 	}, [i]), (0, k.useEffect)(() => {
-		if (!n || E || le) return;
+		if (!n || D || E) return;
 		let e = requestAnimationFrame(() => {
-			let e = C.current;
+			let e = w.current;
 			if (!e) return;
 			e.focus({ preventScroll: !0 });
 			let t = e.value.length;
@@ -16500,13 +16500,13 @@ function ml({ activeId: e, ...t }) {
 		return () => cancelAnimationFrame(e);
 	}, [
 		n?.id,
-		E,
-		le
+		D,
+		E
 	]), !n) return /* @__PURE__ */ (0, A.jsx)(Tl, {
 		onNew: t.onNew,
 		onGitToggle: t.onGitToggle
 	});
-	let Te = h === n.id;
+	let De = g === n.id;
 	return /* @__PURE__ */ (0, A.jsxs)(A.Fragment, { children: [
 		/* @__PURE__ */ (0, A.jsxs)("header", {
 			className: "chat-header",
@@ -16514,32 +16514,32 @@ function ml({ activeId: e, ...t }) {
 				className: "title-area",
 				children: /* @__PURE__ */ (0, A.jsxs)("div", {
 					className: "title-row",
-					children: [Te ? /* @__PURE__ */ (0, A.jsx)("input", {
+					children: [De ? /* @__PURE__ */ (0, A.jsx)("input", {
 						className: "title-input",
 						name: "session-title",
-						value: g,
+						value: _,
 						"aria-label": "Chat title",
-						onChange: (e) => _(n.id, e.target.value),
+						onChange: (e) => v(n.id, e.target.value),
 						onKeyDown: (e) => {
-							e.key === "Enter" && t.onRenameSave(n.id), e.key === "Escape" && _(null);
+							e.key === "Enter" && t.onRenameSave(n.id), e.key === "Escape" && v(null);
 						},
 						autoFocus: !0
 					}) : /* @__PURE__ */ (0, A.jsx)("h1", { children: n.title }), /* @__PURE__ */ (0, A.jsx)("button", {
 						className: "icon-button",
-						onClick: () => Te ? t.onRenameSave(n.id) : t.onRenameStart(n.id),
-						title: Te ? "Save title" : "Rename chat",
-						"aria-label": Te ? "Save title" : "Rename chat",
-						children: /* @__PURE__ */ (0, A.jsx)(Y, { icon: Te ? "mdi:content-save" : "mdi:pencil" })
+						onClick: () => De ? t.onRenameSave(n.id) : t.onRenameStart(n.id),
+						title: De ? "Save title" : "Rename chat",
+						"aria-label": De ? "Save title" : "Rename chat",
+						children: /* @__PURE__ */ (0, A.jsx)(Y, { icon: De ? "mdi:content-save" : "mdi:pencil" })
 					})]
 				})
 			}), /* @__PURE__ */ (0, A.jsxs)("div", {
 				className: "header-actions",
 				children: [
-					E ? /* @__PURE__ */ (0, A.jsx)("button", {
+					D ? /* @__PURE__ */ (0, A.jsx)("button", {
 						onClick: () => t.onArchive(n.id, !1),
 						children: "Restore"
 					}) : null,
-					D ? /* @__PURE__ */ (0, A.jsx)("button", {
+					ue ? /* @__PURE__ */ (0, A.jsx)("button", {
 						className: "icon-button stop-button danger",
 						onClick: () => t.onCancel(n.id),
 						title: "Stop",
@@ -16552,33 +16552,33 @@ function ml({ activeId: e, ...t }) {
 		}),
 		/* @__PURE__ */ (0, A.jsxs)("div", {
 			className: "transcript",
-			onWheelCapture: ve,
-			onTouchStartCapture: ye,
-			onTouchMoveCapture: be,
-			onTouchEndCapture: xe,
-			onTouchCancelCapture: xe,
+			onWheelCapture: be,
+			onTouchStartCapture: xe,
+			onTouchMoveCapture: Se,
+			onTouchEndCapture: Ce,
+			onTouchCancelCapture: Ce,
 			children: [/* @__PURE__ */ (0, A.jsx)(Oo, {
-				ref: v,
+				ref: y,
 				style: { height: "100%" },
-				data: ce,
-				scrollerRef: Se,
-				followOutput: (e) => e || b.current ? "smooth" : !1,
-				atBottomStateChange: _e,
+				data: le,
+				scrollerRef: we,
+				followOutput: (e) => e || x.current ? "smooth" : !1,
+				atBottomStateChange: ye,
 				itemContent: (e, r) => /* @__PURE__ */ (0, A.jsx)(uc, {
 					api: t.api,
 					message: r,
 					sessionId: n.id,
-					canRetry: me,
+					canRetry: he,
 					onCopy: t.onCopy,
 					onRetry: t.onRetry,
 					onRollback: t.onRollback,
 					onValidationReload: t.onValidationReload
 				}, vt(r, e)),
-				components: he
-			}), !ne && ce.length ? /* @__PURE__ */ (0, A.jsx)("button", {
+				components: _e
+			}), !re && le.length ? /* @__PURE__ */ (0, A.jsx)("button", {
 				className: "scroll-to-bottom",
 				type: "button",
-				onClick: we,
+				onClick: Ee,
 				title: "Scroll to bottom",
 				"aria-label": "Scroll to bottom",
 				children: /* @__PURE__ */ (0, A.jsx)("svg", {
@@ -16604,24 +16604,24 @@ function ml({ activeId: e, ...t }) {
 				})
 			}) : null]
 		}),
-		E ? /* @__PURE__ */ (0, A.jsx)("div", {
+		D ? /* @__PURE__ */ (0, A.jsx)("div", {
 			className: "archived-note",
 			children: "Archived chat"
-		}) : le ? /* @__PURE__ */ (0, A.jsx)(Cl, {
+		}) : E ? /* @__PURE__ */ (0, A.jsx)(Cl, {
 			session: n,
-			question: le,
+			question: E,
 			value: d,
 			onChange: (e) => f(n.id, e),
 			onAnswer: (e, n) => {
-				ge(), t.onAnswer(e, n);
+				ve(), t.onAnswer(e, n);
 			}
 		}) : /* @__PURE__ */ (0, A.jsxs)(A.Fragment, { children: [
 			/* @__PURE__ */ (0, A.jsxs)("form", {
 				className: "composer",
 				onSubmit: (e) => {
-					if (e.preventDefault(), ue || pe) return;
+					if (e.preventDefault(), de || O || !pe) return;
 					let r = i.trim();
-					r && (o(n.id), ge(), t.onSend(n.id, r));
+					r && (o(n.id), ve(), t.onSend(n.id, r));
 				},
 				children: [
 					/* @__PURE__ */ (0, A.jsx)(bl, {
@@ -16632,19 +16632,19 @@ function ml({ activeId: e, ...t }) {
 						session: n,
 						onApprove: t.onApprove
 					}),
-					!ue && !pe ? /* @__PURE__ */ (0, A.jsxs)(A.Fragment, { children: [
+					!de && !O ? /* @__PURE__ */ (0, A.jsxs)(A.Fragment, { children: [
 						/* @__PURE__ */ (0, A.jsx)(gl, {
 							settings: m,
-							runSettings: de,
+							runSettings: fe,
 							onChange: (e) => t.onRunSettingsChange(n.id, {
-								...de,
+								...fe,
 								...e
 							})
 						}),
 						/* @__PURE__ */ (0, A.jsx)(_l, {
-							value: de.plan_mode,
+							value: fe.plan_mode,
 							onChange: (e) => t.onRunSettingsChange(n.id, {
-								...de,
+								...fe,
 								plan_mode: e
 							})
 						}),
@@ -16662,15 +16662,15 @@ function ml({ activeId: e, ...t }) {
 								onRemove: (e) => l(n.id, e),
 								onClear: () => u(n.id)
 							}), s.length ? /* @__PURE__ */ (0, A.jsx)("span", {
-								className: `context-budget ${fe.level}`,
-								children: fe.label
+								className: `context-budget ${me.level}`,
+								children: me.label
 							}) : null]
 						}),
 						/* @__PURE__ */ (0, A.jsxs)("div", {
 							className: "composer-input-row",
 							children: [
 								/* @__PURE__ */ (0, A.jsx)("textarea", {
-									ref: C,
+									ref: w,
 									name: "prompt",
 									placeholder: "Ask Codex to change Home Assistant...",
 									rows: 1,
@@ -16683,7 +16683,7 @@ function ml({ activeId: e, ...t }) {
 								/* @__PURE__ */ (0, A.jsxs)("button", {
 									className: "context-button",
 									type: "button",
-									onClick: () => T(!0),
+									onClick: () => ee(!0),
 									title: "Add context",
 									"aria-label": "Add context",
 									children: [/* @__PURE__ */ (0, A.jsx)(Y, { icon: "mdi:paperclip" }), s.length ? /* @__PURE__ */ (0, A.jsx)("b", { children: s.length }) : null]
@@ -16691,7 +16691,7 @@ function ml({ activeId: e, ...t }) {
 								/* @__PURE__ */ (0, A.jsx)("button", {
 									className: "builder-button",
 									type: "button",
-									onClick: () => te(!0),
+									onClick: () => ne(!0),
 									title: "Automation builder",
 									"aria-label": "Automation builder",
 									children: /* @__PURE__ */ (0, A.jsx)(Y, { icon: "mdi:robot-industrial-outline" })
@@ -16699,9 +16699,10 @@ function ml({ activeId: e, ...t }) {
 								/* @__PURE__ */ (0, A.jsx)("button", {
 									className: "send-button",
 									type: "submit",
-									title: "Send",
-									"aria-label": "Send",
-									children: /* @__PURE__ */ (0, A.jsx)(Y, { icon: "mdi:send" })
+									title: pe ? "Send" : "OpenAI training opt-out not confirmed",
+									"aria-label": pe ? "Send" : "OpenAI training opt-out not confirmed",
+									disabled: !pe,
+									children: /* @__PURE__ */ (0, A.jsx)(Y, { icon: pe ? "mdi:send" : "mdi:lock-outline" })
 								})
 							]
 						})
@@ -16709,23 +16710,23 @@ function ml({ activeId: e, ...t }) {
 				]
 			}),
 			/* @__PURE__ */ (0, A.jsx)(zc, {
-				open: ee,
+				open: te,
 				hass: t.hass,
 				contextItems: s,
-				onClose: () => te(!1),
+				onClose: () => ne(!1),
 				onSubmit: (e) => {
-					te(!1), ge(), t.onSend(n.id, e);
+					ne(!1), ve(), t.onSend(n.id, e);
 				}
 			}),
 			/* @__PURE__ */ (0, A.jsx)(Oc, {
 				api: t.api,
 				hass: t.hass,
-				open: w,
+				open: T,
 				selected: s,
 				onAdd: (e) => c(n.id, e),
 				onRemove: (e) => l(n.id, e),
 				onClear: () => u(n.id),
-				onClose: () => T(!1)
+				onClose: () => ee(!1)
 			})
 		] })
 	] });
@@ -17149,7 +17150,7 @@ var El = [
 	}
 ];
 function Dl({ onClose: e, onTab: t, onSettingsSave: n, onBridgeRestart: r, onCoreRestart: i, onBridgeLogRefresh: a, onBridgeLogClear: o, onDeviceLogin: s, onDeviceLoginCancel: c, onAccountLogout: l, onGitSetupRefresh: u, onGitSetupGenerateKey: d, onGitSetupRemoteSave: f, onGitSetupPull: p, onGitSetupBranchChange: m, onGitSetupCommitCheckout: h, onArchiveCleanup: g }) {
-	let _ = M((e) => e.settingsTab), v = M((e) => e.settings), y = M((e) => e.settingsSaving), b = M((e) => e.status).runtime?.bridge_available === !0, x = M((e) => e.bridgeActionRunning), S = M((e) => e.coreActionRunning), C = b ? "Restart" : "Start";
+	let _ = M((e) => e.settingsTab), v = M((e) => e.settings), y = M((e) => e.settingsSaving), b = (M((e) => e.status).runtime || {}).bridge_available === !0, x = M((e) => e.bridgeActionRunning), S = M((e) => e.coreActionRunning), C = b ? "Restart" : "Start";
 	return /* @__PURE__ */ (0, A.jsxs)("div", {
 		className: "modal-backdrop",
 		children: [/* @__PURE__ */ (0, A.jsx)("div", {
@@ -17920,6 +17921,12 @@ function Gl() {
 				value: e.bridge_available === !1 ? "Unavailable" : e.bridge_available ? "Available" : "Unknown",
 				detail: e.bridge_url || "No bridge URL",
 				tone: e.bridge_available === !1 ? "error" : e.bridge_available ? "success" : ""
+			},
+			{
+				label: "Training",
+				value: e.openai_training_opt_out_confirmed ? "Opt-out confirmed" : "Not confirmed",
+				detail: e.openai_training_opt_out_confirmed ? "Task sends allowed" : "Task sends blocked",
+				tone: e.openai_training_opt_out_confirmed ? "success" : "warning"
 			},
 			{
 				label: "Uptime",

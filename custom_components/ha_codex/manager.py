@@ -74,6 +74,11 @@ _READ_ONLY_PROMPT_RE = re.compile(
 )
 _RUN_PLANS_KEY = "run_plans"
 _PLAN_QUESTION_STATUS = "needs_answer"
+_OPENAI_TRAINING_OPT_OUT_NOT_CONFIRMED = (
+    "OpenAI training opt-out has not been confirmed in HA Codex UI options. "
+    "Disable training in OpenAI Data Controls and Codex Settings, then set "
+    "openai_training_opt_out_confirmed before sending prompts or context to Codex."
+)
 
 
 def bundled_codex_path() -> str | None:
@@ -107,6 +112,7 @@ class CodexManager(
         bridge_url: str | None,
         addon_write_scope: str | list[str] | None,
         validation_command: str | list[str] | None,
+        openai_training_opt_out_confirmed: bool = True,
     ) -> None:
         """Initialize the manager."""
         self.hass = hass
@@ -114,6 +120,7 @@ class CodexManager(
         self.workspace_path = workspace_path
         self.codex_command = codex_command
         self.bridge_url = bridge_url
+        self.openai_training_opt_out_confirmed = openai_training_opt_out_confirmed
         self.addon_write_scope = addon_write_scope
         self.validation_config = validation_command
         self.addon_paths = discover_addon_paths(addon_write_scope)
@@ -190,6 +197,11 @@ class CodexManager(
 
     async def async_probe(self) -> dict[str, Any]:
         """Probe Codex and Home Assistant runtime capabilities."""
+        self.addon_paths = discover_addon_paths(self.addon_write_scope)
+        self.validation_command = discover_validation_command(
+            self.validation_config,
+            config_path=self.hass.config.path(),
+        )
         codex_command = self.codex_command.strip()
         bridge_sdk_mode = bool(self.bridge_url and not codex_command)
         if bridge_sdk_mode:
@@ -211,11 +223,6 @@ class CodexManager(
             else await self._run_small_command([probe_command, "exec", "--help"])
             if probe_command
             else {"ok": False, "stdout": "", "stderr": "Codex exec is not available"}
-        )
-        self.addon_paths = discover_addon_paths(self.addon_write_scope)
-        self.validation_command = discover_validation_command(
-            self.validation_config,
-            config_path=self.hass.config.path(),
         )
         runner_options = RunnerOptions(
             codex_command=probe_command or "",
@@ -246,6 +253,7 @@ class CodexManager(
             "workspace_exists": Path(self.workspace_path).is_dir(),
             "addon_paths": self.addon_paths,
             "validation_command": self.validation_command,
+            "openai_training_opt_out_confirmed": self.openai_training_opt_out_confirmed,
         }
         return self.runtime_status
 
@@ -427,6 +435,7 @@ class CodexManager(
         session = self.sessions.get(session_id)
         if session is None:
             raise ValueError(f"Unknown session {session_id}")
+        self._require_openai_training_opt_out_confirmed()
         if session_id in self.tasks and not self.tasks[session_id].done():
             raise ValueError("Session already has an active run")
         content = prompt.strip()
@@ -560,6 +569,7 @@ class CodexManager(
             raise ValueError("Run plan action must be approve, cancel, or revise")
 
         if decision == "approve":
+            self._require_openai_training_opt_out_confirmed()
             plan["status"] = "approved"
             plan["approved_at"] = utc_timestamp()
             session.metadata.pop("pending_plan", None)
@@ -663,6 +673,7 @@ class CodexManager(
         content = prompt.strip()
         if not content:
             raise ValueError("Prompt is required")
+        self._require_openai_training_opt_out_confirmed()
         run_content = str(run_prompt or "").strip() or content
         attachments, serialized_context = self._prepare_context_attachments(context or [])
         if session_id not in self.tasks or self.tasks[session_id].done():
@@ -711,6 +722,7 @@ class CodexManager(
             raise ValueError("Session already has an active run")
         if session.status != "error":
             raise ValueError("Only errored sessions can be retried")
+        self._require_openai_training_opt_out_confirmed()
 
         last_user_prompt = next(
             (
@@ -990,6 +1002,7 @@ class CodexManager(
         plan_run_settings = dict(plan.get("run_settings") or {})
         plan_run_settings["approval_mode"] = "ask"
         try:
+            self._require_openai_training_opt_out_confirmed()
             async for event in self.runner.run(
                 self._run_plan_prompt(plan),
                 session.codex_session_id,
@@ -1133,6 +1146,7 @@ class CodexManager(
         )
         self.active_run_settings[session_id] = effective_run_settings
         try:
+            self._require_openai_training_opt_out_confirmed()
             while True:
                 stale_thread_error = ""
                 attempted_codex_session_id = session.codex_session_id
@@ -1737,6 +1751,11 @@ class CodexManager(
     def _same_message_content(self, left: str, right: str) -> bool:
         """Compare rendered message content while tolerating surrounding whitespace."""
         return left.strip() == right.strip()
+
+    def _require_openai_training_opt_out_confirmed(self) -> None:
+        """Raise when a path would send prompts or selected context to Codex."""
+        if not self.openai_training_opt_out_confirmed:
+            raise ValueError(_OPENAI_TRAINING_OPT_OUT_NOT_CONFIRMED)
 
     async def _async_usage_status(self) -> dict[str, Any]:
         """Return Codex usage percentages when the runtime exposes them."""

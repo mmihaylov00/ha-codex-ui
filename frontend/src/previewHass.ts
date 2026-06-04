@@ -197,10 +197,17 @@ export function createPreviewHomeAssistant(): HomeAssistant {
         case "ha_codex/status":
           return {
             preview: true,
-            runner: "preview",
-            bridge_url: "mock://ha-codex-preview",
-            workspace_path: "/config",
-            validation_command: "ha core check",
+            runtime: {
+              runner_type: "preview",
+              bridge_available: true,
+              bridge_url: "mock://ha-codex-preview",
+              codex_exec_available: true,
+              codex_version: "preview",
+              workspace_path: "/config",
+              workspace_exists: true,
+              validation_command: ["ha", "core", "check"],
+              openai_training_opt_out_confirmed: true,
+            },
           } as T;
         case "ha_codex/settings/get":
           return { settings: clone(previewSettings) } as T;

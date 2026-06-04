@@ -9,6 +9,7 @@
           "codex_command": "Codex command",
           "bridge_url": "Bridge URL",
           "require_admin": "Require administrator",
+          "openai_training_opt_out_confirmed": "OpenAI training opt-out confirmed",
           "addon_write_scope": "Add-on write scope",
           "validation_command": "Validation command"
         }
@@ -28,6 +29,7 @@
           "codex_command": "Codex command",
           "bridge_url": "Bridge URL",
           "require_admin": "Require administrator",
+          "openai_training_opt_out_confirmed": "OpenAI training opt-out confirmed",
           "addon_write_scope": "Add-on write scope",
           "validation_command": "Validation command"
         }

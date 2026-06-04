@@ -115,6 +115,7 @@ After Home Assistant restarts:
 | --- | --- | --- | --- |
 | `workspace_path` | `/config` | Any Home Assistant-accessible filesystem path, usually `/config`. | Codex runs from this Home Assistant config directory. |
 | `require_admin` | `true` | `true` or `false`. Keep `true` unless you intentionally want non-admin access. | Keeps the Codex sidebar panel admin-only. |
+| `openai_training_opt_out_confirmed` | `false` | `true` or `false`. Set `true` after disabling training in OpenAI's Data Controls and Codex Settings. | Allows HA Codex UI to send prompts and selected context to Codex only after the admin confirms the upstream training opt-out. |
 | `codex_command` | blank | Blank to use the pinned SDK runtime, an absolute executable path, or a command name on `PATH`. | Optional custom Codex CLI override. |
 | `bridge_url` | `http://127.0.0.1:8765` | Local URL such as `http://127.0.0.1:8765`, or blank/`none`/`null` to disable bridge mode. | Enables the packaged local bridge. |
 | `addon_write_scope` | `all_visible` | `all_visible`, `none`, blank, or comma-separated absolute paths such as `/addons,/addon_configs`. | Lets Codex see writable add-on folders when present. |
@@ -176,6 +177,7 @@ The integration setup form is prefilled with these defaults:
 | --- | --- | --- | --- |
 | `workspace_path` | `/config` | Any Home Assistant-accessible filesystem path, usually `/config`. | Directory where Codex runs. |
 | `require_admin` | `true` | `true` or `false`. | Restricts the sidebar panel to Home Assistant administrators. |
+| `openai_training_opt_out_confirmed` | `false` | `true` or `false`. | Gates prompt and selected-context sends until the admin confirms OpenAI training opt-out is configured. |
 | `codex_command` | blank | Blank, absolute executable path, or command name on `PATH`. | Optional custom Codex CLI override. |
 | `bridge_url` | `http://127.0.0.1:8765` | Local URL, blank, `none`, or `null`. | Local bridge URL. |
 | `addon_write_scope` | `all_visible` | `all_visible`, `none`, blank, comma-separated absolute paths, or a YAML list for YAML configuration. | Extra add-on paths exposed to Codex when present. |
@@ -191,6 +193,7 @@ a Home Assistant config entry when possible:
 ha_codex:
   workspace_path: /config
   require_admin: true
+  openai_training_opt_out_confirmed: false
   codex_command:
   bridge_url: http://127.0.0.1:8765
   addon_write_scope: all_visible
@@ -205,6 +208,27 @@ ha core restart
 
 The sidebar panel appears as **Codex** for administrators after Home Assistant
 loads the configured integration.
+
+## OpenAI Training Controls
+
+Codex has to send prompts and selected Home Assistant context to OpenAI to work.
+HA Codex UI cannot change OpenAI account or workspace data controls by itself.
+Use OpenAI's [Data Controls][openai-data-controls] and
+[Codex Settings][openai-codex-settings] to opt out of training, then set
+`openai_training_opt_out_confirmed: true` in **Settings > Devices & services >
+HA Codex UI > Configure** or YAML.
+
+When `openai_training_opt_out_confirmed` is `false`, HA Codex UI still starts the
+local bridge and keeps account, login, usage, logs, context browsing, Git review,
+and validation available. It rejects Codex task-content paths that would send
+prompts or selected context, including new runs, run-plan approvals, steering,
+and retries.
+
+For individual ChatGPT/Codex accounts, OpenAI says training can be turned off
+through the privacy portal or ChatGPT Data Controls, and Codex full-environment
+training has separate controls in Codex Settings. For OpenAI API usage, OpenAI's
+[platform data-controls documentation][openai-platform-data-controls] says API
+inputs and outputs are not used for training by default.
 
 ## Authentication Details
 
@@ -276,6 +300,57 @@ tail -f /config/ha_codex_bridge.log
 If the panel changes do not appear after an update, refresh the browser and then
 restart Home Assistant Core.
 
+## Cleanup After Removal
+
+Before or after removing the HA Codex UI integration from Home Assistant, use
+the uninstall script to remove local HA Codex UI and Codex-related files. Stop
+Home Assistant Core first or make a current backup before deleting anything.
+
+```sh
+bash /config/custom_components/ha_codex/uninstall.sh --dry-run
+bash /config/custom_components/ha_codex/uninstall.sh --yes
+```
+
+By default the script removes all HA Codex UI and Codex-related paths it finds
+for the Home Assistant install, including:
+
+- `/config/custom_components/ha_codex`
+- `/config/codex_home`
+- `/config/ha_codex_bridge.log`
+- `/config/.storage/ha_codex.sessions`
+- `/config/www/ha_codex`
+- `/config/bin/start_ha_codex_bridge.sh`
+- `/config/bin/restart_ha_codex_bridge.sh`
+- `/config/bin/codex`
+- `/config/.ssh/ha_codex_ed25519`
+- `/config/.ssh/ha_codex_ed25519.pub`
+- Codex state/config/cache directories such as `.codex`, `.cache/codex`,
+  `.cache/openai-codex`, `.config/codex`, `.local/share/codex`, and
+  `.local/state/codex` under `/config`, `$HOME`, `/root`, and `/homeassistant`
+  when those paths exist.
+
+If your installation used `/homeassistant` instead of `/config`, pass the config
+directory explicitly:
+
+```sh
+bash /homeassistant/custom_components/ha_codex/uninstall.sh --config-dir /homeassistant --dry-run
+bash /homeassistant/custom_components/ha_codex/uninstall.sh --config-dir /homeassistant --yes
+```
+
+If the integration files are already gone, run the copy from a checked-out HA
+Codex UI repository instead:
+
+```sh
+bash scripts/uninstall-ha-codex-ui.sh --config-dir /config --dry-run
+bash scripts/uninstall-ha-codex-ui.sh --config-dir /config --yes
+```
+
+The script has opt-out flags for unusual cases where a Codex binary, generated
+Git key, or Codex user state is shared with something outside HA Codex UI:
+`--keep-codex-bin`, `--keep-git-key`, and `--keep-codex-user-state`. Start or
+restart Home Assistant Core after cleanup so the sidebar, storage cache, and
+static panel registration are refreshed.
+
 ## Development
 
 ```sh
@@ -294,6 +369,9 @@ custom_components/ha_codex/frontend/panel.js
 [releases]: https://github.com/mmihaylov00/ha-codex-ui/releases
 [releases-shield]: https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fmmihaylov00%2Fha-codex-ui%2Freleases%2Flatest&query=%24.tag_name&label=release&logo=github&style=popout
 [downloads-total-shield]: https://img.shields.io/github/downloads/mmihaylov00/ha-codex-ui/total?style=popout
+[openai-codex-settings]: https://chatgpt.com/codex/settings
+[openai-data-controls]: https://help.openai.com/en/articles/5722486-data-controls-faq
+[openai-platform-data-controls]: https://platform.openai.com/docs/guides/your-data
 [revolut-me]: https://revolut.me/mmihaylov00
 [revolut-me-shield]: https://img.shields.io/static/v1.svg?label=%20&message=Revolut&logo=revolut&style=popout
 

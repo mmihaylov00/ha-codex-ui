@@ -12,12 +12,14 @@ from .const import (
     CONF_ADDON_WRITE_SCOPE,
     CONF_BRIDGE_URL,
     CONF_CODEX_COMMAND,
+    CONF_OPENAI_TRAINING_OPT_OUT_CONFIRMED,
     CONF_REQUIRE_ADMIN,
     CONF_VALIDATION_COMMAND,
     CONF_WORKSPACE_PATH,
     DEFAULT_ADDON_WRITE_SCOPE,
     DEFAULT_BRIDGE_URL,
     DEFAULT_CODEX_COMMAND,
+    DEFAULT_OPENAI_TRAINING_OPT_OUT_CONFIRMED,
     DEFAULT_REQUIRE_ADMIN,
     DEFAULT_VALIDATION_COMMAND,
     DEFAULT_WORKSPACE_PATH,
@@ -73,6 +75,7 @@ CONFIG_SCHEMA = vol.Schema(
                 vol.Optional(CONF_CODEX_COMMAND): cv.string,
                 vol.Optional(CONF_BRIDGE_URL): vol.Any(None, cv.string),
                 vol.Optional(CONF_REQUIRE_ADMIN): cv.boolean,
+                vol.Optional(CONF_OPENAI_TRAINING_OPT_OUT_CONFIRMED): cv.boolean,
                 vol.Optional(CONF_ADDON_WRITE_SCOPE): vol.Any(None, cv.string, [cv.string]),
                 vol.Optional(CONF_VALIDATION_COMMAND): vol.Any(None, cv.string, [cv.string]),
             }
@@ -158,6 +161,12 @@ async def _async_setup_runtime(hass: Any, conf: dict[str, Any]) -> bool:
     codex_command = str(conf.get(CONF_CODEX_COMMAND, DEFAULT_CODEX_COMMAND))
     bridge_url = conf.get(CONF_BRIDGE_URL, DEFAULT_BRIDGE_URL)
     require_admin = bool(conf.get(CONF_REQUIRE_ADMIN, DEFAULT_REQUIRE_ADMIN))
+    openai_training_opt_out_confirmed = bool(
+        conf.get(
+            CONF_OPENAI_TRAINING_OPT_OUT_CONFIRMED,
+            DEFAULT_OPENAI_TRAINING_OPT_OUT_CONFIRMED,
+        )
+    )
     addon_write_scope = conf.get(CONF_ADDON_WRITE_SCOPE, DEFAULT_ADDON_WRITE_SCOPE)
     validation_command = conf.get(CONF_VALIDATION_COMMAND, DEFAULT_VALIDATION_COMMAND)
 
@@ -168,6 +177,7 @@ async def _async_setup_runtime(hass: Any, conf: dict[str, Any]) -> bool:
         workspace_path=workspace_path,
         codex_command=codex_command,
         bridge_url=str(bridge_url) if bridge_url else None,
+        openai_training_opt_out_confirmed=openai_training_opt_out_confirmed,
         addon_write_scope=addon_write_scope,
         validation_command=validation_command,
     )
