@@ -43,7 +43,7 @@ jobs:
           coverage report -m
 
       - name: Upload Python coverage
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v7
         with:
           disable_search: true
           fail_ci_if_error: true
@@ -84,7 +84,7 @@ jobs:
             tests/frontend/*.test.mjs
 
       - name: Upload frontend coverage
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v7
         with:
           disable_search: true
           fail_ci_if_error: true
