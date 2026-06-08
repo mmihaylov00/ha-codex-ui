@@ -368,7 +368,7 @@ custom_components/ha_codex/frontend/panel.js
 
 [releases]: https://github.com/mmihaylov00/ha-codex-ui/releases
 [releases-shield]: https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.github.com%2Frepos%2Fmmihaylov00%2Fha-codex-ui%2Freleases%2Flatest&query=%24.tag_name&label=release&logo=github&style=popout
-[downloads-total-shield]: https://img.shields.io/github/downloads/mmihaylov00/ha-codex-ui/total?style=popout
+[downloads-total-shield]: https://img.shields.io/github/downloads/mmihaylov00/ha-codex-ui/total?label=downloads&logo=github&style=flat
 [openai-codex-settings]: https://chatgpt.com/codex/settings
 [openai-data-controls]: https://help.openai.com/en/articles/5722486-data-controls-faq
 [openai-platform-data-controls]: https://platform.openai.com/docs/guides/your-data

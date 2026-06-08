@@ -1567,12 +1567,16 @@ class SessionRunTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertFalse(runtime["openai_training_opt_out_confirmed"])
         self.assertFalse(status["runtime"]["openai_training_opt_out_confirmed"])
-        self.assertEqual((await manager.async_account_status())["error"], "Bridge mode is not configured")
+        self.assertEqual(
+            (await manager.async_account_status())["error"], "Bridge mode is not configured"
+        )
         self.assertEqual(
             (await manager.async_account_device_login_start())["error"],
             "Bridge mode is not configured",
         )
-        self.assertEqual((await manager.async_start_bridge())["error"], "Bridge mode is not configured")
+        self.assertEqual(
+            (await manager.async_start_bridge())["error"], "Bridge mode is not configured"
+        )
         with self.assertRaisesRegex(ValueError, "training opt-out has not been confirmed"):
             await manager.async_send(session.id, "Inspect configuration.yaml")
         self.assertEqual(session.messages, [])
